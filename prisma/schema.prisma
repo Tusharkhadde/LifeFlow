@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id
+  name      String?
+  email     String   @unique
+  image     String?
+  language  String   @default("en")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
+  documents Document[]
+  expenses  Expense[]
+  goals     Goal[]
+  reminders Reminder[]
+  insights      Insight[]
+  telegramLinks TelegramLink[]
+}
+
+model TelegramLink {
+  id             String   @id @default(uuid())
+  userId         String
+  telegramUserId BigInt   @unique
+  telegramName   String?
+  linkedAt       DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id           String    @id @default(uuid())
+  userId       String
+  title        String
+  description  String?
+  category     String    @default("general")
+  urgency      String    @default("normal")
+  dueDate      DateTime?
+  completed    Boolean   @default(false)
+  snoozedUntil DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id            String   @id @default(uuid())
+  userId        String
+  name          String
+  type          String
+  category      String   @default("uncategorized")
+  fileUrl       String?
+  ocrData       Json?
+  confidence    Float?
+  keyDates      Json?
+  extractedData Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  userId      String
+  amount      Float
+  category    String
+  description String?
+  date        DateTime @default(now())
+  source      String   @default("manual")
+  receiptUrl  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Goal {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  description String?
+  category    String   @default("personal")
+  target      Float?
+  current     Float    @default(0)
+  unit        String?
+  frequency   String?
+  deadline    DateTime?
+  completed   Boolean  @default(false)
+  checkIns    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Reminder {
+  id           String    @id @default(uuid())
+  userId       String
+  title        String
+  description  String?
+  datetime     DateTime
+  recurrence   String?
+  category     String    @default("general")
+  completed    Boolean   @default(false)
+  snoozedUntil DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Insight {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String
+  title       String
+  description String
+  severity    String   @default("info")
+  dismissed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
