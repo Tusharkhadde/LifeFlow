@@ -172,25 +172,54 @@ function localChat(msg: string, tasks: number, spent: number, goals: number): st
 
 // ---- Save entities to DB ----
 
-async function saveEntities(userId: string, e: ExtractedEntities): Promise<string[]> {
-  const c: string[] = [];
+async function saveEntities(userId: string, e: ExtractedEntities, existingReminders: Array<{ title: string; datetime: Date }>, existingTasks: Array<{ title: string; dueDate: Date | null }>): Promise<{ created: string[]; relatedReminders: string[]; relatedTasks: string[] }> {
+  const created: string[] = [];
+  const relatedReminders: string[] = [];
+  const relatedTasks: string[] = [];
+
   for (const t of e.tasks || []) {
     await prisma.task.create({ data: { userId, title: t.title, category: t.category || "general", urgency: t.urgency || "normal", dueDate: t.dueDate ? new Date(t.dueDate) : null } });
-    c.push(t.title);
+    created.push(t.title);
+
+    // Check for similar existing tasks
+    const lower = t.title.toLowerCase();
+    const words = lower.split(/\s+/).filter((w) => w.length > 3);
+    for (const existing of existingTasks) {
+      const exLower = existing.title.toLowerCase();
+      const isSimilar = words.some((w) => exLower.includes(w)) && exLower !== lower;
+      if (isSimilar && !relatedTasks.includes(existing.title)) {
+        relatedTasks.push(existing.title);
+      }
+    }
   }
+
   for (const x of e.expenses || []) {
     await prisma.expense.create({ data: { userId, amount: x.amount, category: x.category || "other", date: x.date ? new Date(x.date) : new Date(), source: "telegram" } });
-    c.push(`₹${x.amount} ${x.category || "expense"}`);
+    created.push(`₹${x.amount} ${x.category || "expense"}`);
   }
+
   for (const g of e.goals || []) {
     await prisma.goal.create({ data: { userId, title: g.title, category: g.category || "personal", target: g.target || null, current: 0, unit: g.unit || null, deadline: g.deadline ? new Date(g.deadline) : null } });
-    c.push(g.title);
+    created.push(g.title);
   }
+
   for (const r of e.reminders || []) {
     await prisma.reminder.create({ data: { userId, title: r.title, datetime: r.datetime ? new Date(r.datetime) : new Date(), category: r.category || "general" } });
-    c.push(r.title);
+    created.push(r.title);
+
+    // Check for similar existing reminders
+    const lower = r.title.toLowerCase();
+    const words = lower.split(/\s+/).filter((w) => w.length > 3);
+    for (const existing of existingReminders) {
+      const exLower = existing.title.toLowerCase();
+      const isSimilar = words.some((w) => exLower.includes(w)) && exLower !== lower;
+      if (isSimilar && !relatedReminders.includes(existing.title)) {
+        relatedReminders.push(existing.title);
+      }
+    }
   }
-  return c;
+
+  return { created, relatedReminders, relatedTasks };
 }
 
 // ---- Main handler ----
@@ -211,9 +240,31 @@ export async function handleMessage(message: string, userId: string): Promise<st
   // STEP 1: Try local extraction first (instant, 0ms)
   const localEntities = localExtract(message);
   if (localEntities?.hasEntities) {
-    const created = await saveEntities(userId, localEntities);
-    if (created.length > 0) {
-      return `Done! Saved: ${created.join(", ")}. What else?`;
+    const result = await saveEntities(userId, localEntities, reminders, tasks);
+    if (result.created.length > 0) {
+      let response = `Done! Saved: ${result.created.join(", ")}`;
+
+      // Warn about similar existing reminders
+      if (result.relatedReminders.length > 0) {
+        response += `\n\nYou also have similar reminders:\n${result.relatedReminders.map((r) => `- ${r}`).join("\n")}`;
+      }
+
+      // Warn about similar existing tasks
+      if (result.relatedTasks.length > 0) {
+        response += `\n\nRelated tasks you already have:\n${result.relatedTasks.map((t) => `- ${t}`).join("\n")}`;
+      }
+
+      // Show all pending reminders if user just added one
+      if (localEntities.reminders.length > 0 && reminders.length > 0) {
+        const upcoming = reminders
+          .slice(0, 5)
+          .map((r) => `- ${r.title} (${new Date(r.datetime).toLocaleDateString()})`)
+          .join("\n");
+        response += `\n\nAll your pending reminders:\n${upcoming}`;
+      }
+
+      response += "\n\nWhat else?";
+      return response;
     }
   }
 
