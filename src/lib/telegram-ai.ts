@@ -89,15 +89,25 @@ async function callAI(
   maxTokens: number,
   temperature: number
 ): Promise<string | null> {
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://api.tokenrouter.com/v1";
-  const model = process.env.OPENAI_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+  const baseUrl = process.env.OPENAI_BASE_URL;
+  const model = process.env.OPENAI_MODEL;
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!baseUrl || !model || !apiKey) {
+    console.error("[telegram-ai] Missing env vars:", {
+      baseUrl: !!baseUrl,
+      model: !!model,
+      apiKey: !!apiKey,
+    });
+    return null;
+  }
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model,
@@ -110,10 +120,16 @@ async function callAI(
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const errBody = await response.text();
+      console.error(`[telegram-ai] API error ${response.status}:`, errBody);
+      return null;
+    }
+
     const data = await response.json();
     return data.choices?.[0]?.message?.content || null;
-  } catch {
+  } catch (err) {
+    console.error("[telegram-ai] API call failed:", err);
     return null;
   }
 }
@@ -201,6 +217,188 @@ async function saveEntities(userId: string, entities: ExtractedEntities): Promis
   return created;
 }
 
+// ---- Local fallback when AI is down ----
+
+function localExtractEntities(message: string): ExtractedEntities | null {
+  const lower = message.toLowerCase();
+
+  // Detect expenses: "spent ₹500 on food", "₹500 groceries", "paid 200 for transport"
+  const expenseMatch = lower.match(/(?:spent|paid|bought|cost|price|₹|rs\.?|inr)\s*(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:on|for)?\s*(\w+)?/);
+  if (expenseMatch) {
+    const amount = parseFloat(expenseMatch[1].replace(/,/g, ""));
+    const desc = expenseMatch[2] || message;
+    const category = guessExpenseCategory(lower);
+    return {
+      hasEntities: true,
+      tasks: [],
+      expenses: [{ amount, category, description: desc, date: null }],
+      goals: [],
+      reminders: [],
+    };
+  }
+
+  // Detect reminders: "remind me to X at Y", "don't forget to X"
+  const reminderMatch = lower.match(/(?:remind me to|don't forget to|remember to|set reminder)\s+(.+)/);
+  if (reminderMatch) {
+    const title = capitalize(reminderMatch[1].replace(/tomorrow|today|next week|next month/g, "").trim());
+    const datetime = parseRelativeDate(lower);
+    return {
+      hasEntities: true,
+      tasks: [],
+      expenses: [],
+      goals: [],
+      reminders: [{ title, description: null, datetime, category: "general" }],
+    };
+  }
+
+  // Detect tasks: "I need to X by Y", "have to X", "must X", "todo: X"
+  const taskMatch = lower.match(/(?:need to|have to|must|todo:?|task:?|i should|i gotta|i gotta)\s+(.+)/);
+  if (taskMatch || lower.includes(" by ")) {
+    const title = capitalize((taskMatch?.[1] || message).replace(/tomorrow|today|next week|next month|by \w+/g, "").trim());
+    const urgency = lower.includes("urgent") || lower.includes("asap") || lower.includes("important") ? "high" : "normal";
+    const dueDate = extractDueDate(lower);
+    return {
+      hasEntities: true,
+      tasks: [{ title, description: null, category: "general", urgency, dueDate }],
+      expenses: [],
+      goals: [],
+      reminders: [],
+    };
+  }
+
+  // Detect goals: "save X for Y", "goal: X", "target X"
+  const goalMatch = lower.match(/(?:save|goal|target|aim)\s+(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*)\s*(?:for|towards?)\s+(.+)/);
+  if (goalMatch) {
+    const target = parseFloat(goalMatch[1].replace(/,/g, ""));
+    const title = capitalize(goalMatch[2].trim());
+    return {
+      hasEntities: true,
+      tasks: [],
+      expenses: [],
+      goals: [{ title, description: null, category: "personal", target, unit: "rupees", deadline: null }],
+      reminders: [],
+    };
+  }
+
+  return null;
+}
+
+function guessExpenseCategory(text: string): string {
+  if (text.includes("food") || text.includes("grocer") || text.includes("dinner") || text.includes("lunch") || text.includes("breakfast") || text.includes("meal") || text.includes("restaurant")) return "food";
+  if (text.includes("transport") || text.includes("uber") || text.includes("ola") || text.includes("taxi") || text.includes("petrol") || text.includes("fuel")) return "transport";
+  if (text.includes("subscription") || text.includes("netflix") || text.includes("spotify") || text.includes("prime")) return "subscriptions";
+  if (text.includes("electric") || text.includes("bill") || text.includes("water") || text.includes("internet") || text.includes("recharge")) return "utilities";
+  if (text.includes("shop") || text.includes("clothes") || text.includes("shoes") || text.includes("amazon")) return "shopping";
+  if (text.includes("doctor") || text.includes("medicine") || text.includes("hospital") || text.includes("gym")) return "health";
+  if (text.includes("book") || text.includes("course") || text.includes("class") || text.includes("tuition")) return "education";
+  return "other";
+}
+
+function parseRelativeDate(text: string): string {
+  const now = new Date();
+  if (text.includes("tomorrow")) {
+    now.setDate(now.getDate() + 1);
+  } else if (text.includes("next week")) {
+    now.setDate(now.getDate() + 7);
+  } else if (text.includes("next month")) {
+    now.setMonth(now.getMonth() + 1);
+  }
+
+  // Try to extract time: "at 5pm", "at 5:30", "at 17:00"
+  const timeMatch = text.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1]);
+    const minutes = parseInt(timeMatch[2] || "0");
+    const ampm = timeMatch[3];
+    if (ampm === "pm" && hours < 12) hours += 12;
+    if (ampm === "am" && hours === 12) hours = 0;
+    now.setHours(hours, minutes, 0, 0);
+  } else {
+    now.setHours(9, 0, 0, 0); // Default to 9 AM
+  }
+
+  return now.toISOString().replace("Z", "").split(".")[0];
+}
+
+function extractDueDate(text: string): string | null {
+  const now = new Date();
+  if (text.includes("today")) {
+    return now.toISOString().split("T")[0];
+  }
+  if (text.includes("tomorrow")) {
+    now.setDate(now.getDate() + 1);
+    return now.toISOString().split("T")[0];
+  }
+  if (text.includes("next week")) {
+    now.setDate(now.getDate() + 7);
+    return now.toISOString().split("T")[0];
+  }
+  if (text.includes("next month")) {
+    now.setMonth(now.getMonth() + 1);
+    return now.toISOString().split("T")[0];
+  }
+
+  // Try to extract "by April 15th" or "by 15 april"
+  const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  for (let i = 0; i < monthNames.length; i++) {
+    if (text.includes(monthNames[i])) {
+      const dayMatch = text.match(new RegExp(`${monthNames[i]}\\s+(\\d{1,2})`)) ||
+                       text.match(new RegExp(`(\\d{1,2})\\s+${monthNames[i]}`));
+      if (dayMatch) {
+        const day = parseInt(dayMatch[1]);
+        const date = new Date(now.getFullYear(), i, day);
+        if (date < now) date.setFullYear(date.getFullYear() + 1);
+        return date.toISOString().split("T")[0];
+      }
+    }
+  }
+
+  return null;
+}
+
+function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function localChatResponse(message: string, taskCount: number, expenseTotal: number, goalCount: number): string {
+  const lower = message.toLowerCase();
+
+  if (lower.match(/(?:hi|hello|hey|howdy|good\s*(morning|afternoon|evening))/)) {
+    return "Hey there! What's up? I can help you with tasks, expenses, goals, or just chat. What's on your mind?";
+  }
+
+  if (lower.match(/how\s+(are|r)\s+you|how('?s|\s+is)\s+it\s+going/)) {
+    return "I'm doing great, thanks for asking! All your life data is organized and ready. How can I help you today?";
+  }
+
+  if (lower.includes("joke")) {
+    const jokes = [
+      "Why don't scientists trust atoms? Because they make up everything!",
+      "I told my wife she was drawing her eyebrows too high. She looked surprised.",
+      "Why did the scarecrow win an award? He was outstanding in his field!",
+      "I'm reading a book about anti-gravity. It's impossible to put down!",
+    ];
+    return jokes[Math.floor(Math.random() * jokes.length)];
+  }
+
+  if (lower.match(/what'?s?\s+the\s+news|current\s+events|what'?s?\s+happening/)) {
+    return "I don't have real-time news access, but I can tell you what's happening in your life! You have " + taskCount + " pending tasks, ₹" + expenseTotal.toLocaleString() + " spent this month, and " + goalCount + " active goals. Want details on any of these?";
+  }
+
+  if (lower.match(/thank|thanks|thx/)) {
+    return "You're welcome! Anything else I can help with?";
+  }
+
+  if (lower.match(/bye|goodbye|see\s+ya|good\s+night/)) {
+    return "See you later! Take care!";
+  }
+
+  // Generic response
+  return "I hear you! I can help with your tasks, expenses, goals, and reminders — or just chat. What would you like to do?";
+}
+
+// ---- End local fallback ----
+
 export async function handleMessage(
   message: string,
   userId: string
@@ -241,7 +439,7 @@ export async function handleMessage(
     callAI(chatPrompt, message, 500, 0.8),
   ]);
 
-  // Save entities in background if extracted
+  // Save entities in background if extracted (AI or local)
   let createdItems: string[] = [];
   let entityContext = "";
 
@@ -251,12 +449,19 @@ export async function handleMessage(
       createdItems = await saveEntities(userId, entities);
       entityContext = buildEntityContext(entities);
     }
+  } else {
+    // AI failed — use local fallback for entity extraction
+    const localEntities = localExtractEntities(message);
+    if (localEntities?.hasEntities) {
+      createdItems = await saveEntities(userId, localEntities);
+      entityContext = buildEntityContext(localEntities);
+    }
   }
 
-  // If we created items, regenerate the chat response with entity context included
+  // If we created items, try to get AI to acknowledge them naturally
   if (createdItems.length > 0 && entityContext) {
     const chatPromptWithContext = CHAT_PROMPT
-      .replace("{TASK_COUNT}", String(tasks.length + (createdItems.length)))
+      .replace("{TASK_COUNT}", String(tasks.length + createdItems.length))
       .replace("{HIGH_URGENCY}", String(highUrgency))
       .replace("{EXPENSE_TOTAL}", expenseTotal.toLocaleString())
       .replace("{GOAL_COUNT}", String(goals.length))
@@ -265,15 +470,15 @@ export async function handleMessage(
 
     const chatWithContext = await callAI(chatPromptWithContext, message, 500, 0.8);
     if (chatWithContext) return chatWithContext;
+
+    // AI failed for response — give natural local confirmation
+    const items = createdItems.join(", ");
+    return `Done! Saved: ${items}. What else can I help with?`;
   }
 
-  // Return natural chat response
+  // Return natural AI chat response
   if (chatRaw) return chatRaw;
 
-  // Fallback
-  if (createdItems.length > 0) {
-    return `Done! I've saved: ${createdItems.join(", ")}`;
-  }
-
-  return "I'm having trouble connecting right now. Try again in a moment.";
+  // AI completely failed — use local chat fallback
+  return localChatResponse(message, tasks.length, expenseTotal, goals.length);
 }
