@@ -1,31 +1,33 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 const DEMO_USER_ID = "demo-user";
 
-export async function getAuthenticatedUserId(): Promise<string> {
+export async function getAuthenticatedUserId(headers?: Headers): Promise<string> {
   try {
-    const { userId } = await auth();
-    if (userId) {
-      await ensureUserExists(userId);
-      return userId;
+    if (headers) {
+      const session = await auth.api.getSession({ headers });
+      if (session?.user?.id) {
+        await ensureUserExists(session.user.id, session.user.email, session.user.name);
+        return session.user.id;
+      }
     }
   } catch {
-    // Clerk not configured or not available
+    // Auth not configured or not available
   }
   // Fall back to demo user
   await ensureDemoUser();
   return DEMO_USER_ID;
 }
 
-async function ensureUserExists(clerkUserId: string) {
+async function ensureUserExists(userId: string, email?: string, name?: string) {
   return prisma.user.upsert({
-    where: { id: clerkUserId },
+    where: { id: userId },
     update: {},
     create: {
-      id: clerkUserId,
-      email: `${clerkUserId}@clerk.user`,
-      name: "User",
+      id: userId,
+      email: email || `${userId}@user.local`,
+      name: name || "User",
     },
   });
 }
