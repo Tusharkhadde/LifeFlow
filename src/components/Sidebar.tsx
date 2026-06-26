@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/components/LanguageProvider";
 import { t } from "@/lib/i18n";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { useSession, signOut } from "@/lib/auth-client";
 import {
   LayoutDashboard,
   FileText,
@@ -37,12 +37,12 @@ export function Sidebar() {
   const pathname = usePathname();
   const { language } = useLanguage();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { data: session } = useSession();
 
-  const userInitial = user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || "U";
-  const userName = user?.firstName || user?.fullName || "User";
-  const userEmail = user?.emailAddresses?.[0]?.emailAddress || "";
+  const user = session?.user;
+  const userInitial = user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || "U";
+  const userName = user?.name || "User";
+  const userEmail = user?.email || "";
 
   return (
     <>
@@ -104,9 +104,9 @@ export function Sidebar() {
         <div className="px-3 mt-auto">
           <div className="glass-card p-3 rounded-xl">
             <div className="flex items-center gap-3">
-              {user?.imageUrl ? (
+              {user?.image ? (
                 <img
-                  src={user.imageUrl}
+                  src={user.image}
                   alt={userName}
                   className="w-8 h-8 rounded-full object-cover"
                 />
@@ -120,7 +120,7 @@ export function Sidebar() {
                 <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
               </div>
               <button
-                onClick={() => signOut({ redirectUrl: "/" })}
+                onClick={() => signOut({ fetchOptions: { onSuccess: () => { window.location.href = "/"; } } })}
                 className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                 title="Sign out"
               >
