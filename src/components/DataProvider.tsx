@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Task, Document, Expense, Goal, Reminder, Insight } from "@/lib/types";
 
 interface DataContextType {
@@ -39,11 +40,13 @@ const DataContext = createContext<DataContextType>({
 
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url);
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error(`Failed to fetch ${url}`);
   return res.json();
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -64,6 +67,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
         fetchJSON<{ insights: Insight[] }>("/api/insights"),
       ]);
 
+      // Check if any request was unauthorized
+      const anyUnauthorized = [taskRes, docRes, expRes, goalRes, remRes, insRes].some(
+        (r) => r.status === "rejected" && r.reason?.message === "UNAUTHORIZED"
+      );
+      if (anyUnauthorized) {
+        router.push("/login");
+        return;
+      }
+
       if (taskRes.status === "fulfilled") setTasks(taskRes.value.tasks);
       if (docRes.status === "fulfilled") setDocuments(docRes.value.documents);
       if (expRes.status === "fulfilled") setExpenses(expRes.value.expenses);
@@ -75,7 +87,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     refreshAll();
