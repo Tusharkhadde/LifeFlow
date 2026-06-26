@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useData } from "@/components/DataProvider";
 import { useLanguage } from "@/components/LanguageProvider";
 import { t } from "@/lib/i18n";
@@ -51,6 +51,11 @@ export default function DashboardPage() {
   const { language } = useLanguage();
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState<string[]>([]);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const sortedTasks = [...tasks]
     .filter((t) => !t.completed)
@@ -156,13 +161,15 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">{t("dashboard", language)}</h1>
-          <p className="text-muted-foreground mt-1">
-            {new Date().toLocaleDateString("en-US", {
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })}
+          <p className="text-muted-foreground mt-1" suppressHydrationWarning>
+            {mounted
+              ? new Date().toLocaleDateString("en-US", {
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                })
+              : ""}
           </p>
         </div>
         <Button

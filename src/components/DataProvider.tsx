@@ -54,6 +54,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+  const [shouldRedirect, setShouldRedirect] = useState(false);
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
@@ -72,7 +74,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         (r) => r.status === "rejected" && r.reason?.message === "UNAUTHORIZED"
       );
       if (anyUnauthorized) {
-        router.push("/login");
+        setShouldRedirect(true);
         return;
       }
 
@@ -87,11 +89,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted) {
+      refreshAll();
+    }
+  }, [mounted, refreshAll]);
+
+  useEffect(() => {
+    if (shouldRedirect) {
+      router.push("/login");
+    }
+  }, [shouldRedirect, router]);
 
   return (
     <DataContext.Provider value={{
@@ -101,7 +115,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       goals, setGoals,
       reminders, setReminders,
       insights, setInsights,
-      loading,
+      loading: loading && !mounted,
       refreshAll,
     }}>
       {children}
