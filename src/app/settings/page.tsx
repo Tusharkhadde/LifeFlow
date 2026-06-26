@@ -297,6 +297,13 @@ export default function SettingsPage() {
                       <p className="text-xs text-muted-foreground mb-2">Your link code (expires in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")})</p>
                       <p className="text-3xl font-mono font-bold tracking-widest">{linkCode}</p>
                     </div>
+                    <Button
+                      onClick={() => window.open(`https://t.me/LifeFlowCopilotBot?start=${linkCode}`, "_blank")}
+                      className="w-full gradient-bg text-white"
+                    >
+                      <Send size={14} className="mr-2" />
+                      Open Telegram &amp; Link
+                    </Button>
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" onClick={copyCode} className="flex-1">
                         {codeCopied ? <Check size={14} className="mr-2" /> : <Copy size={14} className="mr-2" />}
@@ -305,14 +312,6 @@ export default function SettingsPage() {
                       <Button variant="outline" size="sm" onClick={handleGenerateLink} disabled={linkLoading} className="flex-1">
                         Regenerate
                       </Button>
-                    </div>
-                    <div className="p-3 rounded-xl bg-muted/50">
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-medium">Steps:</span><br />
-                        1. Open Telegram and search for your bot<br />
-                        2. Send <code className="bg-muted px-1 rounded">/link {linkCode}</code><br />
-                        3. You&apos;ll receive a confirmation message
-                      </p>
                     </div>
                   </div>
                 ) : (

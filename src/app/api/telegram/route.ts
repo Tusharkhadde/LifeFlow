@@ -236,9 +236,65 @@ export async function POST(request: NextRequest) {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    // Handle /start and /link without requiring account link
-    if (text === "/start" || text === "/help") {
-      const response = await generateAIResponse(text, "");
+    // Handle /start with deep link payload (link code)
+    if (text.startsWith("/start")) {
+      const payload = text.replace("/start", "").trim();
+
+      // If payload looks like a 6-digit code, treat as link attempt
+      if (/^\d{6}$/.test(payload)) {
+        // Check if already linked
+        const existingLink = await prisma.telegramLink.findUnique({
+          where: { telegramUserId: telegramUserId },
+        });
+
+        if (existingLink) {
+          await sendTelegramMessage(Number(chatId), "Your account is already linked!");
+          return NextResponse.json({ ok: true });
+        }
+
+        // Look up the link code
+        const linkCode = await prisma.linkCode.findUnique({
+          where: { code: payload },
+        });
+
+        if (!linkCode || linkCode.expiresAt < new Date()) {
+          await sendTelegramMessage(Number(chatId),
+            "Invalid or expired code. Please generate a new one from the LifeFlow web app → Settings → Link Telegram"
+          );
+          return NextResponse.json({ ok: true });
+        }
+
+        // Create the link
+        await prisma.telegramLink.create({
+          data: {
+            userId: linkCode.userId,
+            telegramUserId: telegramUserId,
+            telegramName: msg.from.first_name,
+          },
+        });
+
+        // Clean up the used code
+        await prisma.linkCode.delete({ where: { code: payload } });
+
+        const user = await prisma.user.findUnique({
+          where: { id: linkCode.userId },
+        });
+
+        await sendTelegramMessage(Number(chatId),
+          `Account linked! Welcome *${user?.name || "User"}*.\n\nYou can now use:\n• /tasks - View tasks\n• /expenses - View expenses\n• /goals - View goals\n• /reminders - View reminders\n\nOr just ask me anything!`
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Regular /start without payload
+      const response = await generateAIResponse("/start", "");
+      await sendTelegramMessage(Number(chatId), response);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Handle /help
+    if (text === "/help") {
+      const response = await generateAIResponse("/help", "");
       await sendTelegramMessage(Number(chatId), response);
       return NextResponse.json({ ok: true });
     }
