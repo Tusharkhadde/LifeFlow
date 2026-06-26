@@ -3,7 +3,7 @@
 import { useTheme } from "next-themes";
 import { useLanguage } from "@/components/LanguageProvider";
 import { t } from "@/lib/i18n";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { useSession, signOut } from "@/lib/auth-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Language } from "@/lib/types";
@@ -23,10 +23,11 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { language, setLanguage } = useLanguage();
   const [mounted, setMounted] = useState(false);
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { data: session } = useSession();
 
   useEffect(() => setMounted(true), []);
+
+  const user = session?.user;
 
   const languages: { value: Language; label: string; nativeLabel: string }[] = [
     { value: "en", label: "English", nativeLabel: "English" },
@@ -34,9 +35,9 @@ export default function SettingsPage() {
     { value: "mr", label: "Marathi", nativeLabel: "मराठी" },
   ];
 
-  const userInitial = user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || "U";
-  const userName = user?.firstName || user?.fullName || "User";
-  const userEmail = user?.emailAddresses?.[0]?.emailAddress || "";
+  const userInitial = user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || "U";
+  const userName = user?.name || "User";
+  const userEmail = user?.email || "";
   const memberSince = user?.createdAt ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "N/A";
 
   return (
@@ -121,9 +122,9 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-4">
-              {user?.imageUrl ? (
+              {user?.image ? (
                 <img
-                  src={user.imageUrl}
+                  src={user.image}
                   alt={userName}
                   className="w-16 h-16 rounded-full object-cover"
                 />
@@ -203,7 +204,7 @@ export default function SettingsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => signOut({ redirectUrl: "/" })}
+                onClick={() => signOut({ fetchOptions: { onSuccess: () => { window.location.href = "/"; } } })}
                 className="ml-auto"
               >
                 <LogOut size={14} className="mr-2" />
