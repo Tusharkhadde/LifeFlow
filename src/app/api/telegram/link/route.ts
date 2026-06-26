@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 // Generate a short link code for Telegram linking
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = session.user.id;
 
     // Ensure user exists in DB
     await prisma.user.upsert({
@@ -16,8 +18,8 @@ export async function POST() {
       update: {},
       create: {
         id: userId,
-        email: `${userId}@clerk.placeholder`,
-        name: "User",
+        email: session.user.email || `${userId}@user.local`,
+        name: session.user.name || "User",
       },
     });
 
@@ -44,13 +46,14 @@ export async function POST() {
 }
 
 // Check if user has a linked Telegram account
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
     const links = await prisma.telegramLink.findMany({
       where: { userId },
     });
@@ -73,13 +76,14 @@ export async function GET() {
 }
 
 // Unlink Telegram account
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
     await prisma.telegramLink.deleteMany({
       where: { userId },
     });
