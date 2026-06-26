@@ -108,6 +108,8 @@ async function callAI(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://lifeflow-ai.vercel.app",
+        "X-OpenRouter-Title": "LifeFlow AI",
       },
       body: JSON.stringify({
         model,

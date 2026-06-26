@@ -19,14 +19,20 @@ Current context:
 
 Respond in a helpful, action-oriented way. If the user asks what to do today, prioritize by urgency and consequence.`;
 
-    const baseUrl = process.env.OPENAI_BASE_URL || "https://api.tokenrouter.com/v1";
-    const model = process.env.OPENAI_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+    const baseUrl = process.env.OPENAI_BASE_URL;
+    const model = process.env.OPENAI_MODEL;
+
+    if (!baseUrl || !model || !process.env.OPENAI_API_KEY) {
+      return NextResponse.json({ response: generateFallbackResponse(message) });
+    }
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "HTTP-Referer": "https://lifeflow-ai.vercel.app",
+        "X-OpenRouter-Title": "LifeFlow AI",
       },
       body: JSON.stringify({
         model,
