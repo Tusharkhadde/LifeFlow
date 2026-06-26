@@ -16,6 +16,11 @@ import {
   Shield,
   Palette,
   LogOut,
+  Send,
+  Link2,
+  Unlink,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -25,7 +30,71 @@ export default function SettingsPage() {
   const [mounted, setMounted] = useState(false);
   const { data: session } = useSession();
 
+  // Telegram state
+  const [telegramLinked, setTelegramLinked] = useState(false);
+  const [telegramAccounts, setTelegramAccounts] = useState<{ telegramId: bigint; name: string | null; linkedAt: Date }[]>([]);
+  const [linkCode, setLinkCode] = useState("");
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [unlinkLoading, setUnlinkLoading] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
   useEffect(() => setMounted(true), []);
+
+  // Fetch Telegram link status
+  useEffect(() => {
+    if (!mounted) return;
+    fetch("/api/telegram/link")
+      .then((r) => r.json())
+      .then((data) => {
+        setTelegramLinked(data.linked);
+        setTelegramAccounts(data.accounts || []);
+      })
+      .catch(() => {});
+  }, [mounted]);
+
+  // Countdown timer for code expiry
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  async function handleGenerateLink() {
+    setLinkLoading(true);
+    try {
+      const res = await fetch("/api/telegram/link", { method: "POST" });
+      const data = await res.json();
+      if (data.code) {
+        setLinkCode(data.code);
+        setCountdown(data.expiresIn || 300);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLinkLoading(false);
+    }
+  }
+
+  async function handleUnlink() {
+    setUnlinkLoading(true);
+    try {
+      await fetch("/api/telegram/link", { method: "DELETE" });
+      setTelegramLinked(false);
+      setTelegramAccounts([]);
+      setLinkCode("");
+    } catch {
+      // silent
+    } finally {
+      setUnlinkLoading(false);
+    }
+  }
+
+  function copyCode() {
+    navigator.clipboard.writeText(linkCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  }
 
   const user = session?.user;
 
@@ -182,6 +251,78 @@ export default function SettingsPage() {
                 <div className="absolute right-1 top-1 w-4 h-4 rounded-full bg-white" />
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Send size={18} className="text-primary" />
+              Telegram Bot
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {telegramLinked ? (
+              <>
+                <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20">
+                  <div className="flex items-center gap-2 text-green-600 text-sm font-medium">
+                    <Link2 size={14} />
+                    Linked to Telegram
+                  </div>
+                  {telegramAccounts.map((acc) => (
+                    <p key={String(acc.telegramId)} className="text-xs text-muted-foreground mt-1">
+                      {acc.name || "Telegram user"} — linked {new Date(acc.linkedAt).toLocaleDateString()}
+                    </p>
+                  ))}
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleUnlink}
+                  disabled={unlinkLoading}
+                  className="w-full"
+                >
+                  <Unlink size={14} className="mr-2" />
+                  {unlinkLoading ? "Unlinking..." : "Unlink Telegram"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Connect your Telegram account to receive daily summaries, reminders, and manage your life from chat.
+                </p>
+                {linkCode ? (
+                  <div className="space-y-3">
+                    <div className="p-4 rounded-xl bg-muted/50 text-center">
+                      <p className="text-xs text-muted-foreground mb-2">Your link code (expires in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")})</p>
+                      <p className="text-3xl font-mono font-bold tracking-widest">{linkCode}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={copyCode} className="flex-1">
+                        {codeCopied ? <Check size={14} className="mr-2" /> : <Copy size={14} className="mr-2" />}
+                        {codeCopied ? "Copied!" : "Copy Code"}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleGenerateLink} disabled={linkLoading} className="flex-1">
+                        Regenerate
+                      </Button>
+                    </div>
+                    <div className="p-3 rounded-xl bg-muted/50">
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-medium">Steps:</span><br />
+                        1. Open Telegram and search for your bot<br />
+                        2. Send <code className="bg-muted px-1 rounded">/link {linkCode}</code><br />
+                        3. You&apos;ll receive a confirmation message
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <Button onClick={handleGenerateLink} disabled={linkLoading} className="w-full gradient-bg text-white">
+                    <Link2 size={14} className="mr-2" />
+                    {linkLoading ? "Generating..." : "Link Telegram Account"}
+                  </Button>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

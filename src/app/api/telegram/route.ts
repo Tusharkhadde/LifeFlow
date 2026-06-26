@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { sendTelegramMessage } from "@/lib/telegram";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -14,18 +15,6 @@ interface TelegramMessage {
     id: number;
   };
   text?: string;
-}
-
-async function sendMessage(chatId: number, text: string) {
-  await fetch(`${TELEGRAM_API}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "Markdown",
-    }),
-  });
 }
 
 async function generateAIResponse(
@@ -250,7 +239,7 @@ export async function POST(request: NextRequest) {
     // Handle /start and /link without requiring account link
     if (text === "/start" || text === "/help") {
       const response = await generateAIResponse(text, "");
-      await sendMessage(chatId, response);
+      await sendTelegramMessage(Number(chatId), response);
       return NextResponse.json({ ok: true });
     }
 
@@ -258,50 +247,52 @@ export async function POST(request: NextRequest) {
     if (text.startsWith("/link")) {
       const code = text.replace("/link", "").trim();
       if (!code) {
-        await sendMessage(
-          chatId,
+        await sendTelegramMessage(Number(chatId),
           "Usage: /link <code>\n\nGet your code from the LifeFlow web app → Settings → Link Telegram"
         );
         return NextResponse.json({ ok: true });
       }
 
-      // Look up the link code
-      const link = await prisma.telegramLink.findFirst({
-        where: {
-          telegramUserId: telegramUserId,
-        },
+      // Check if already linked
+      const existingLink = await prisma.telegramLink.findUnique({
+        where: { telegramUserId: telegramUserId },
       });
 
-      if (link) {
-        await sendMessage(chatId, "Your account is already linked!");
+      if (existingLink) {
+        await sendTelegramMessage(Number(chatId), "Your account is already linked!");
         return NextResponse.json({ ok: true });
       }
 
-      // For now, accept the code as a direct userId mapping
-      // In production, you'd use a proper code system
-      const user = await prisma.user.findFirst({
-        where: { id: code },
+      // Look up the link code (must be unexpired)
+      const linkCode = await prisma.linkCode.findUnique({
+        where: { code },
       });
 
-      if (!user) {
-        await sendMessage(
-          chatId,
-          "Invalid code. Please check and try again."
+      if (!linkCode || linkCode.expiresAt < new Date()) {
+        await sendTelegramMessage(Number(chatId),
+          "Invalid or expired code. Please generate a new one from the LifeFlow web app → Settings → Link Telegram"
         );
         return NextResponse.json({ ok: true });
       }
 
+      // Create the link
       await prisma.telegramLink.create({
         data: {
-          userId: user.id,
+          userId: linkCode.userId,
           telegramUserId: telegramUserId,
           telegramName: msg.from.first_name,
         },
       });
 
-      await sendMessage(
-        chatId,
-        `Account linked! Welcome *${user.name || "User"}*. 
+      // Clean up the used code
+      await prisma.linkCode.delete({ where: { code } });
+
+      const user = await prisma.user.findUnique({
+        where: { id: linkCode.userId },
+      });
+
+      await sendTelegramMessage(Number(chatId),
+        `Account linked! Welcome *${user?.name || "User"}*. 
 
 You can now use:
 • /tasks - View tasks
@@ -321,7 +312,7 @@ Or just ask me anything!`
 
     const userId = telegramLink?.userId || "";
     const response = await generateAIResponse(text, userId);
-    await sendMessage(chatId, response);
+    await sendTelegramMessage(Number(chatId), response);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -23,18 +23,25 @@ export async function POST(request: Request) {
       },
     });
 
+    // Delete any existing link codes for this user
+    await prisma.linkCode.deleteMany({ where: { userId } });
+
     // Generate a 6-digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store the code with expiry (5 minutes)
-    await prisma.telegramLink.deleteMany({
-      where: { userId },
+    // Store the code with 5-minute expiry
+    await prisma.linkCode.create({
+      data: {
+        userId,
+        code,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      },
     });
 
-    // Return the code (user sends this to the bot as `/link <code>`)
     return NextResponse.json({
       code,
       instructions: `Send this to your Telegram bot: /link ${code}`,
+      expiresIn: 300,
     });
   } catch (error) {
     console.error("Link code generation error:", error);
@@ -84,9 +91,7 @@ export async function DELETE(request: Request) {
     }
 
     const userId = session.user.id;
-    await prisma.telegramLink.deleteMany({
-      where: { userId },
-    });
+    await prisma.telegramLink.deleteMany({ where: { userId } });
 
     return NextResponse.json({ success: true });
   } catch (error) {
