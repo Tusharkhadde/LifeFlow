@@ -1,12 +1,35 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const isPublicRoute = createRouteMatcher(["/", "/login(.*)", "/signup(.*)"]);
+const publicRoutes = ["/", "/login", "/signup", "/api/auth"];
 
-export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request) && !request.nextUrl.pathname.startsWith("/api/")) {
-    await auth().protect();
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (publicRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"))) {
+    return NextResponse.next();
   }
-});
+
+  // Lightweight cookie check — full session validation happens in API routes/pages
+  const sessionToken = request.cookies.get("better-auth.session_token");
+
+  if (pathname.startsWith("/api/")) {
+    if (pathname.startsWith("/api/auth")) {
+      return NextResponse.next();
+    }
+    if (!sessionToken) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.next();
+  }
+
+  if (!sessionToken) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("redirect", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: [
