@@ -10,7 +10,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // Lightweight cookie check — full session validation happens in API routes/pages
-  const sessionToken = request.cookies.get("better-auth.session_token");
+  // Better Auth prefixes cookies with __Secure- on HTTPS sites
+  const sessionToken = request.cookies.get("__Secure-better-auth.session_token") || request.cookies.get("better-auth.session_token");
 
   if (pathname.startsWith("/api/")) {
     if (pathname.startsWith("/api/auth")) {
