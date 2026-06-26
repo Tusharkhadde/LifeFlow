@@ -2,12 +2,59 @@
 
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { SignUp } from "@clerk/nextjs";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { signUp, signIn } from "@/lib/auth-client";
 import { AuroraHero } from "@/components/ui/aurora-hero";
 import { Zap, Sun, Moon, ArrowLeft } from "lucide-react";
+import { FaGithub, FaGoogle } from "react-icons/fa";
 
 export default function SignupPage() {
   const { theme, setTheme } = useTheme();
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const result = await signUp.email({
+        name,
+        email,
+        password,
+        username: username || undefined,
+      });
+      if (result.error) {
+        setError(result.error.message || "Failed to create account");
+      } else {
+        router.push("/dashboard");
+        router.refresh();
+      }
+    } catch {
+      setError("Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSocialLogin(provider: "github" | "google") {
+    setError("");
+    try {
+      await signIn.social({
+        provider,
+        callbackURL: "/dashboard",
+      });
+    } catch {
+      setError("Social login failed");
+    }
+  }
 
   return (
     <div className="min-h-screen flex">
@@ -53,17 +100,109 @@ export default function SignupPage() {
 
           {/* Title */}
           <h1 className="text-3xl font-bold mb-2">Create account</h1>
-          <p className="text-muted-foreground mb-8">
+          <p className="text-muted-foreground mb-6">
             Get started with LifeFlow AI
           </p>
 
-          {/* Clerk Sign Up Component */}
-          <SignUp
-            routing="path"
-            path="/signup"
-            signInUrl="/login"
-            fallbackRedirectUrl="/dashboard"
-          />
+          {/* Social Login Buttons */}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <button
+              onClick={() => handleSocialLogin("github")}
+              className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-border bg-background hover:bg-muted transition-colors font-medium text-sm"
+            >
+              <FaGithub size={18} />
+              GitHub
+            </button>
+            <button
+              onClick={() => handleSocialLogin("google")}
+              className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-border bg-background hover:bg-muted transition-colors font-medium text-sm"
+            >
+              <FaGoogle size={18} />
+              Google
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div className="relative mb-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">or continue with email</span>
+            </div>
+          </div>
+
+          {/* Signup Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                {error}
+              </div>
+            )}
+            <div>
+              <label htmlFor="name" className="text-sm font-medium block mb-1.5">
+                Name
+              </label>
+              <input
+                id="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="John Doe"
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+            <div>
+              <label htmlFor="username" className="text-sm font-medium block mb-1.5">
+                Username <span className="text-muted-foreground text-xs">(optional)</span>
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="johndoe"
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+            <div>
+              <label htmlFor="email" className="text-sm font-medium block mb-1.5">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="text-sm font-medium block mb-1.5">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                minLength={8}
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-xl gradient-bg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {loading ? "Creating account..." : "Create account"}
+            </button>
+          </form>
 
           {/* Footer */}
           <p className="text-center text-sm text-muted-foreground mt-6">
