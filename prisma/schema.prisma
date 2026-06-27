@@ -73,6 +73,7 @@ model TelegramLink {
   userId         String
   telegramUserId BigInt   @unique
   telegramName   String?
+  preferredModel String?
   linkedAt       DateTime @default(now())
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
