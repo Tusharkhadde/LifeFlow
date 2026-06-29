@@ -103,7 +103,7 @@ async function callAI(systemPrompt: string, userMessage: string, maxTokens: numb
 
 // ---- Local entity extraction (instant, no AI) ----
 
-function localExtract(message: string): ExtractedEntities | null {
+export function localExtract(message: string): ExtractedEntities | null {
   const lower = message.toLowerCase();
 
   // Expense: "spent ₹500 on food", "paid 200 for uber"
@@ -114,11 +114,20 @@ function localExtract(message: string): ExtractedEntities | null {
     return { hasEntities: true, tasks: [], expenses: [{ amount, category: cat, date: null }], goals: [], reminders: [] };
   }
 
-  // Reminder: "remind me to X", "don't forget to X"
-  const remMatch = lower.match(/(?:remind me to|don't forget to|remember to)\s+(.+)/);
-  if (remMatch) {
-    const title = cap(remMatch[1].replace(/tomorrow|today|next week/g, "").trim());
-    return { hasEntities: true, tasks: [], expenses: [], goals: [], reminders: [{ title, datetime: parseDate(lower), category: "general" }] };
+  // Reminder: "remind me to X", "don't forget to X", "remember to X"
+  const remTrigger = lower.match(/(?:remind me(?: to)?|don't forget to|remember to|set a reminder to)/);
+  if (remTrigger) {
+    const after = lower.slice(remTrigger.index! + remTrigger[0].length).trim();
+    const before = lower.slice(0, remTrigger.index!).trim();
+    const sourceText = after && !after.match(/^(at|on|by|tomorrow|today|next week)\b/) ? after : before || after;
+    const title = cleanupReminderTitle(sourceText || lower);
+    return {
+      hasEntities: true,
+      tasks: [],
+      expenses: [],
+      goals: [],
+      reminders: [{ title, datetime: parseDate(lower), category: "general" }],
+    };
   }
 
   // Task: "need to X", "have to X", "todo: X"
@@ -151,40 +160,104 @@ function guessCat(t: string): string {
   return "other";
 }
 
-function parseDate(t: string): string {
+export function parseDate(t: string): string {
   const now = new Date();
-  if (t.includes("tomorrow")) now.setDate(now.getDate() + 1);
-  else if (t.includes("next week")) now.setDate(now.getDate() + 7);
-  const timeM = t.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-  if (timeM) {
-    let h = parseInt(timeM[1]);
-    const m = parseInt(timeM[2] || "0");
-    if (timeM[3] === "pm" && h < 12) h += 12;
-    if (timeM[3] === "am" && h === 12) h = 0;
-    now.setHours(h, m, 0, 0);
-  } else {
-    now.setHours(9, 0, 0, 0);
-  }
-  return now.toISOString().replace("Z", "").split(".")[0];
-}
+  const lower = t.toLowerCase();
+  const date = new Date(now.getTime());
 
-function dueDate(t: string): string | null {
-  const now = new Date();
-  if (t.includes("today")) return now.toISOString().split("T")[0];
-  if (t.includes("tomorrow")) { now.setDate(now.getDate() + 1); return now.toISOString().split("T")[0]; }
-  if (t.includes("next week")) { now.setDate(now.getDate() + 7); return now.toISOString().split("T")[0]; }
-  const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
-  for (let i = 0; i < months.length; i++) {
-    if (t.includes(months[i])) {
-      const dm = t.match(new RegExp(`${months[i]}\\s+(\\d{1,2})`)) || t.match(new RegExp(`(\\d{1,2})\\s+${months[i]}`));
-      if (dm) {
-        const d = new Date(now.getFullYear(), i, parseInt(dm[1]));
-        if (d < now) d.setFullYear(d.getFullYear() + 1);
-        return d.toISOString().split("T")[0];
+  if (lower.includes("day after tomorrow")) date.setDate(date.getDate() + 2);
+  else if (lower.includes("tomorrow")) date.setDate(date.getDate() + 1);
+  else if (lower.includes("next week")) date.setDate(date.getDate() + 7);
+  else if (lower.includes("today")) {
+    // keep today
+  } else {
+    const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+    const monthMatch = lower.match(new RegExp(`(?:on\s+)?(${months.join("|")})\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?`));
+    if (monthMatch) {
+      const monthIndex = months.indexOf(monthMatch[1]);
+      const day = parseInt(monthMatch[2], 10);
+      const year = monthMatch[3] ? parseInt(monthMatch[3], 10) : date.getFullYear();
+      date.setFullYear(year, monthIndex, day);
+    } else {
+      const numericMatch = lower.match(/(?:on\s+)?(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+      if (numericMatch) {
+        const day = parseInt(numericMatch[1], 10);
+        const month = parseInt(numericMatch[2], 10) - 1;
+        const year = numericMatch[3] ? parseInt(numericMatch[3], 10) : date.getFullYear();
+        date.setFullYear(year, month, day);
       }
     }
   }
-  return null;
+
+  const timeM = lower.match(/(?:at|@)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (timeM) {
+    let h = parseInt(timeM[1], 10);
+    const m = parseInt(timeM[2] || "0", 10);
+    if (timeM[3] === "pm" && h < 12) h += 12;
+    if (timeM[3] === "am" && h === 12) h = 0;
+    date.setHours(h, m, 0, 0);
+  } else if (lower.includes("noon")) {
+    date.setHours(12, 0, 0, 0);
+  } else if (lower.includes("midnight")) {
+    date.setHours(0, 0, 0, 0);
+  } else if (lower.includes("evening") || lower.includes("night")) {
+    date.setHours(18, 0, 0, 0);
+  } else if (lower.includes("morning")) {
+    date.setHours(9, 0, 0, 0);
+  } else {
+    date.setHours(9, 0, 0, 0);
+  }
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+}
+
+export function dueDate(t: string): string | null {
+  const lower = t.toLowerCase();
+  const now = new Date();
+  const date = new Date(now.getTime());
+  let foundDate = false;
+
+  if (lower.includes("day after tomorrow")) {
+    date.setDate(date.getDate() + 2);
+    foundDate = true;
+  } else if (lower.includes("tomorrow")) {
+    date.setDate(date.getDate() + 1);
+    foundDate = true;
+  } else if (lower.includes("next week")) {
+    date.setDate(date.getDate() + 7);
+    foundDate = true;
+  } else if (lower.includes("today")) {
+    foundDate = true;
+  } else {
+    const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+    const monthMatch = lower.match(new RegExp(`(?:on\s+)?(${months.join("|")})\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?`));
+    if (monthMatch) {
+      const monthIndex = months.indexOf(monthMatch[1]);
+      const day = parseInt(monthMatch[2], 10);
+      const year = monthMatch[3] ? parseInt(monthMatch[3], 10) : date.getFullYear();
+      date.setFullYear(year, monthIndex, day);
+      foundDate = true;
+    } else {
+      const numericMatch = lower.match(/(?:on\s+)?(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+      if (numericMatch) {
+        const day = parseInt(numericMatch[1], 10);
+        const month = parseInt(numericMatch[2], 10) - 1;
+        const year = numericMatch[3] ? parseInt(numericMatch[3], 10) : date.getFullYear();
+        date.setFullYear(year, month, day);
+        foundDate = true;
+      }
+    }
+  }
+
+  return foundDate ? date.toISOString().split("T")[0] : null;
+}
+
+export function cleanupReminderTitle(text: string): string {
+  return text
+    .replace(/\b(on|at|by|due|tomorrow|today|next week|this morning|this evening|this night|tonight)\b.*$/i, "")
+    .replace(/[.,!?]+$/, "")
+    .trim();
 }
 
 function cap(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -409,3 +482,19 @@ export async function analyzeDocumentImage(imageBase64: string, mimeType: string
     return null;
   }
 }
+
+const telegramAI = {
+  localExtract,
+  parseDate,
+  dueDate,
+  cleanupReminderTitle,
+  analyzeDocumentImage,
+  handleMessage,
+  getDefaultModel,
+  getDefaultVisionModel,
+  getModelInfo,
+  resolveVisionModel,
+  AVAILABLE_MODELS,
+};
+
+export default telegramAI;
