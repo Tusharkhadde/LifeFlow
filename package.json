@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:seed": "npx tsx prisma/seed.ts"
+    "db:seed": "npx tsx prisma/seed.ts",
+    "telegram:parse": "npx tsx scripts/telegram-parser-harness.ts",
+    "telegram:test": "npx tsx scripts/telegram-parser-test.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
