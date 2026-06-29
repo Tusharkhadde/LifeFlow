@@ -104,16 +104,17 @@ export async function GET(request: Request) {
       }
 
       // Reminders due today
-      const todayReminders = reminders.filter((r) => {
+      const todayDueReminders = reminders.filter((r) => {
         const d = new Date(r.datetime);
         return d >= todayStart && d < todayEnd;
       });
-      if (todayReminders.length > 0) {
-        const list = todayReminders
+      const newTodayReminders = todayDueReminders.filter((r) => !r.lastNotifiedAt || new Date(r.lastNotifiedAt) < todayStart);
+      if (newTodayReminders.length > 0) {
+        const list = newTodayReminders
           .slice(0, 5)
-          .map((r) => `  • *${r.title}*`)
+          .map((r) => `  • *${r.title}* at ${new Date(r.datetime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`)
           .join("\n");
-        sections.push(`Reminders today (${todayReminders.length}):\n${list}`);
+        sections.push(`Reminders today (${newTodayReminders.length}):\n${list}`);
       }
 
       // Expenses today
@@ -157,6 +158,14 @@ export async function GET(request: Request) {
 
       const message = sections.join("\n\n");
       await sendTelegramMessage(Number(link.telegramUserId), message);
+
+      if (todayDueReminders.length > 0) {
+        await prisma.reminder.updateMany({
+          where: { id: { in: todayDueReminders.map((r) => r.id) } },
+          data: { lastNotifiedAt: now },
+        });
+      }
+
       sent++;
     } catch (err) {
       console.error(`Failed to send to ${link.telegramUserId}:`, err);
