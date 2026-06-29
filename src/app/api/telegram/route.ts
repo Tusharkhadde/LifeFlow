@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { handleMessage, analyzeDocumentImage, AVAILABLE_MODELS, getModelInfo, getDefaultModel } from "@/lib/telegram-ai";
+import telegramAI from "@/lib/telegram-ai";
+const { handleMessage, analyzeDocumentImage, AVAILABLE_MODELS, getModelInfo, getDefaultModel } = telegramAI;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -205,7 +206,7 @@ export async function POST(request: NextRequest) {
     if (text === "/help") {
       await sendTelegramMessage(
         chatId,
-        `*How to use LifeFlow Bot:*\n\n*Link your account first:*\n1. Open LifeFlow web app → Settings\n2. Tap "Link Telegram"\n3. Send: /link <code>\n\n*Then just chat:*\n• _"I need to file taxes by April 15th, urgent"_\n• _"Spent ₹1200 on dinner"_\n• _"Save ₹50k for a trip by December"_\n• _"Remind me to exercise every morning"_\n\n*Ask me anything:*\n• _"What's the news today?"_\n• _"Tell me a joke"_\n• _"How are you?"_\n• _"What's AI?"_\n\n*Query your data:*\n• _"What are my tasks?"_\n• _"How much did I spend?"_\n• _"Show my goals"_`
+        `*How to use LifeFlow Bot:*\n\n*Link your account first:*\n1. Open LifeFlow web app → Settings\n2. Tap "Link Telegram"\n3. Send: /link <code>\n\n*Then just chat:*\n• _"I need to file taxes by April 15th, urgent"_\n• _"Spent ₹1200 on dinner"_\n• _"Save ₹50k for a trip by December"_\n• _"Remind me to pay my OpenAI bill on June 30 at 5pm"_\n\n*Ask me anything:*\n• _"What's the news today?"_\n• _"Tell me a joke"_\n• _"How are you?"_\n• _"What's AI?"_\n\n*Query your data:*\n• _"What are my tasks?"_\n• _"How much did I spend?"_\n• _"Show my upcoming reminders"_`
       );
       return NextResponse.json({ ok: true });
     }
@@ -285,6 +286,189 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    // Authenticated command shortcuts
+    const link = await prisma.telegramLink.findUnique({ where: { telegramUserId } });
+    const linkedUserId = link?.userId || "";
+    const authCommandList = ["/tasks", "/expenses", "/goals", "/reminders", "/summary", "/history"];
+
+    if (!linkedUserId && authCommandList.some((c) => text.toLowerCase().startsWith(c))) {
+      await sendTelegramMessage(
+        chatId,
+        "You're not linked yet! Send /link <code> to connect your LifeFlow account.\n\nGet your code from the web app → Settings → Link Telegram"
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/tasks")) {
+      const tasks = await prisma.task.findMany({
+        where: { userId: linkedUserId, completed: false },
+        orderBy: [{ urgency: "desc" }, { dueDate: "asc" }],
+        take: 20,
+      });
+
+      if (tasks.length === 0) {
+        await sendTelegramMessage(
+          chatId,
+          "No pending tasks yet. Ask me to add one naturally, for example: \"I need to file a report by tomorrow.\""
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const lines = tasks.map((task, index) => {
+        const due = task.dueDate
+          ? ` — due ${new Date(task.dueDate).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
+          : "";
+        return `${index + 1}. *${task.title}* [${task.urgency}]${due}`;
+      });
+
+      await sendTelegramMessage(chatId, `*Your pending tasks:*
+${lines.join("\n")}`);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/reminders")) {
+      const reminders = await prisma.reminder.findMany({
+        where: { userId: linkedUserId, completed: false },
+        orderBy: { datetime: "asc" },
+        take: 20,
+      });
+
+      if (reminders.length === 0) {
+        await sendTelegramMessage(
+          chatId,
+          "No active reminders found. Ask me to remind you naturally, like: \"Remind me to pay my OpenAI bill tomorrow at 5pm.\""
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const lines = reminders.map((reminder, index) => {
+        return `${index + 1}. *${reminder.title}* — ${new Date(reminder.datetime).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+      });
+
+      await sendTelegramMessage(chatId, `*Upcoming reminders:*
+${lines.join("\n")}`);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/goals")) {
+      const goals = await prisma.goal.findMany({
+        where: { userId: linkedUserId, completed: false },
+        orderBy: [{ deadline: "asc" }, { createdAt: "desc" }],
+        take: 20,
+      });
+
+      if (goals.length === 0) {
+        await sendTelegramMessage(
+          chatId,
+          "No active goals yet. Tell me what you're saving for or aiming to achieve."
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const lines = goals.map((goal, index) => {
+        const progress = goal.target ? `${Math.round((goal.current / goal.target) * 100)}%` : "No target";
+        const deadline = goal.deadline
+          ? new Date(goal.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+          : "No deadline";
+        return `${index + 1}. *${goal.title}* — ${progress}, ${deadline}`;
+      });
+
+      await sendTelegramMessage(chatId, `*Your goals:*
+${lines.join("\n")}`);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/expenses")) {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const expenses = await prisma.expense.findMany({
+        where: { userId: linkedUserId, date: { gte: since } },
+        orderBy: { date: "desc" },
+        take: 20,
+      });
+
+      if (expenses.length === 0) {
+        await sendTelegramMessage(chatId, "No expenses recorded in the last 30 days.");
+        return NextResponse.json({ ok: true });
+      }
+
+      const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+      const categoryTotals = expenses.reduce((acc, expense) => {
+        acc[expense.category] = (acc[expense.category] || 0) + expense.amount;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const topCategories = Object.entries(categoryTotals)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([category, amount]) => `• ${category}: ₹${amount.toLocaleString()}`)
+        .join("\n");
+
+      const lines = expenses.slice(0, 6).map((expense, index) => {
+        return `${index + 1}. ₹${expense.amount.toLocaleString()} on ${expense.category} — ${new Date(expense.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+      });
+
+      await sendTelegramMessage(
+        chatId,
+        `*Expenses (30d):* ₹${total.toLocaleString()}
+${topCategories}
+
+*Recent expenses:*
+${lines.join("\n")}`
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/summary")) {
+      const [tasksCount, remindersCount, goalsCount, expensesCount] = await Promise.all([
+        prisma.task.count({ where: { userId: linkedUserId, completed: false } }),
+        prisma.reminder.count({ where: { userId: linkedUserId, completed: false } }),
+        prisma.goal.count({ where: { userId: linkedUserId, completed: false } }),
+        prisma.expense.count({ where: { userId: linkedUserId, date: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
+      ]);
+
+      await sendTelegramMessage(
+        chatId,
+        `*Quick summary:*
+• ${tasksCount} open tasks
+• ${remindersCount} upcoming reminders
+• ${goalsCount} active goals
+• ${expensesCount} expenses recorded this month`
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/history")) {
+      const [recentTasks, recentReminders, recentExpenses, recentGoals] = await Promise.all([
+        prisma.task.findMany({ where: { userId: linkedUserId }, orderBy: { createdAt: "desc" }, take: 3 }),
+        prisma.reminder.findMany({ where: { userId: linkedUserId }, orderBy: { createdAt: "desc" }, take: 3 }),
+        prisma.expense.findMany({ where: { userId: linkedUserId }, orderBy: { createdAt: "desc" }, take: 3 }),
+        prisma.goal.findMany({ where: { userId: linkedUserId }, orderBy: { createdAt: "desc" }, take: 3 }),
+      ]);
+
+      const lines: string[] = [];
+      recentTasks.forEach((task) => {
+        lines.push(`• Task: *${task.title}*`);
+      });
+      recentReminders.forEach((reminder) => {
+        lines.push(`• Reminder: *${reminder.title}* at ${new Date(reminder.datetime).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })}`);
+      });
+      recentExpenses.forEach((expense) => {
+        lines.push(`• Expense: ₹${expense.amount.toLocaleString()} on ${expense.category}`);
+      });
+      recentGoals.forEach((goal) => {
+        lines.push(`• Goal: *${goal.title}*`);
+      });
+
+      await sendTelegramMessage(
+        chatId,
+        lines.length > 0
+          ? `*Recent history:*
+${lines.join("\n")}`
+          : "No recent activity found yet. Start by telling me what you want to remember, do, or save."
+      );
+      return NextResponse.json({ ok: true });
+    }
+
     // Look up linked user
     const telegramLink = await prisma.telegramLink.findUnique({
       where: { telegramUserId },
@@ -294,7 +478,7 @@ export async function POST(request: NextRequest) {
     const preferredModel = telegramLink?.preferredModel || undefined;
 
     // Commands that require auth
-    const authCommands = ["/tasks", "/expenses", "/goals", "/reminders", "/summary"];
+    const authCommands = ["/tasks", "/expenses", "/goals", "/reminders", "/summary", "/history"];
     const isAuthCommand = authCommands.some((c) => text.toLowerCase().startsWith(c));
 
     if (isAuthCommand && !userId) {
