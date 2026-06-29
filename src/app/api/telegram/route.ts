@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
 import telegramAI from "@/lib/telegram-ai";
+import { agentRouter } from "@/lib/agent-router";
 const { handleMessage, analyzeDocumentImage, AVAILABLE_MODELS, getModelInfo, getDefaultModel } = telegramAI;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
@@ -504,9 +505,19 @@ ${lines.join("\n")}`
       return NextResponse.json({ ok: true });
     }
 
-    // Free-form message → AI handles everything (chat, create, query)
-    const response = await handleMessage(text, userId, preferredModel);
-    await sendTelegramMessage(chatId, response);
+    // Free-form message → Agent Router handles everything
+    const routerResult = await agentRouter.route({
+      text,
+      telegramUserId,
+      chatId,
+    });
+
+    if (!routerResult.success) {
+      await sendTelegramMessage(chatId, routerResult.message);
+      if (routerResult.followUpQuestions && routerResult.followUpQuestions.length > 0) {
+        await sendTelegramMessage(chatId, `*Questions:*\n${routerResult.followUpQuestions.map(q => `• ${q}`).join("\n")}`);
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
