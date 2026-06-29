@@ -24,8 +24,6 @@ datasource db {
     goals        Goal[]
     reminders    Reminder[]
     insights     Insight[]
-    agents       Agent[]
-    agentLogs    AgentLog[]
     telegramLinks TelegramLink[]
     linkCodes     LinkCode[]
     sessions      Session[]
