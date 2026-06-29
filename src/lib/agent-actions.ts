@@ -91,10 +91,10 @@ export async function createTask(
       data: task,
     };
   } catch (error) {
-    console.error("[createTask] Error:", error);
+    // Don't log errors to avoid exposing data
     return {
       success: false,
-      message: "Failed to create task",
+      message: "Failed to create task. Please try again.",
     };
   }
 }
@@ -146,10 +146,9 @@ export async function createExpense(
       data: expense,
     };
   } catch (error) {
-    console.error("[createExpense] Error:", error);
     return {
       success: false,
-      message: "Failed to log expense",
+      message: "Failed to log expense. Please try again.",
     };
   }
 }
@@ -199,10 +198,9 @@ export async function createReminder(
       data: reminder,
     };
   } catch (error) {
-    console.error("[createReminder] Error:", error);
     return {
       success: false,
-      message: "Failed to create reminder",
+      message: "Failed to create reminder. Please try again.",
     };
   }
 }
@@ -237,10 +235,9 @@ export async function createGoal(
       data: goal,
     };
   } catch (error) {
-    console.error("[createGoal] Error:", error);
     return {
       success: false,
-      message: "Failed to create goal",
+      message: "Failed to create goal. Please try again.",
     };
   }
 }
@@ -263,19 +260,17 @@ Respond with JSON:
   "timeframe": "today|this_week|this_month|custom"
 }`;
 
-  const response = await callAI(
-    "You are a planning assistant",
-    prompt,
-    400,
-    0.7
-  );
-
-  if (!response) return null;
-
   try {
+    const response = await callAI(
+      "You are a planning assistant",
+      prompt,
+      400,
+      0.7
+    );
+
+    if (!response) return null;
     return JSON.parse(response);
   } catch (e) {
-    console.error("[planUserRequest] Parse error:", e);
     return null;
   }
 }
@@ -307,10 +302,9 @@ export async function searchDocuments(
       data: documents,
     };
   } catch (error) {
-    console.error("[searchDocuments] Error:", error);
     return {
       success: false,
-      message: "Failed to search documents",
+      message: "Failed to search documents. Please try again.",
     };
   }
 }

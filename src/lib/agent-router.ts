@@ -102,10 +102,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
       return result;
     } catch (error) {
-      console.error("[AgentRouter] Error:", error);
       return {
         success: false,
-        message: "Something went wrong. Please try again.",
+        message: "Something went wrong. Please try again later.",
       };
     }
   }
@@ -122,24 +121,19 @@ Tasks pending: ${await prisma.task.count({ where: { userId, completed: false } }
 Today's date: ${new Date().toLocaleDateString()}
 `;
 
-    const response = await callAI(
-      this.systemPrompt,
-      `${userContext}\n\nUser message: "${text}"`,
-      500,
-      0.7
-    );
-
-    if (!response) {
-      return {
-        primaryAction: "general_chat",
-        confidence: 0.5,
-        parameters: { text },
-        requiresConfirmation: false,
-        contextNeeded: [],
-      };
-    }
-
     try {
+      const response = await callAI(
+        this.systemPrompt,
+        `${userContext}\n\nUser message: "${text}"`,
+        500,
+        0.7
+      );
+
+      if (!response) {
+        // Fallback to local extraction if AI unavailable
+        return this.fallbackPlan(text);
+      }
+
       const parsed = JSON.parse(response);
       return {
         primaryAction: parsed.action as ActionType,
@@ -149,15 +143,60 @@ Today's date: ${new Date().toLocaleDateString()}
         contextNeeded: parsed.clarifications || [],
       };
     } catch (e) {
-      console.error("[AgentRouter] Failed to parse plan:", e);
+      // Silent fail - use fallback
+      return this.fallbackPlan(text);
+    }
+  }
+
+  private fallbackPlan(text: string): Plan {
+    // Local pattern matching without AI
+    const lower = text.toLowerCase();
+
+    if (lower.match(/spent|paid|bought|cost|₹|rs\./)) {
       return {
-        primaryAction: "general_chat",
-        confidence: 0.5,
+        primaryAction: "create_expense",
+        confidence: 0.7,
         parameters: { text },
         requiresConfirmation: false,
         contextNeeded: [],
       };
     }
+    if (lower.match(/remind|don't forget|remember|set a reminder/)) {
+      return {
+        primaryAction: "create_reminder",
+        confidence: 0.7,
+        parameters: { text },
+        requiresConfirmation: false,
+        contextNeeded: [],
+      };
+    }
+    if (lower.match(/need to|have to|must|todo|task|i should|i gotta/)) {
+      return {
+        primaryAction: "create_task",
+        confidence: 0.7,
+        parameters: { text },
+        requiresConfirmation: false,
+        contextNeeded: [],
+      };
+    }
+    if (lower.match(/save|goal|target/)) {
+      return {
+        primaryAction: "set_goal",
+        confidence: 0.6,
+        parameters: { text },
+        requiresConfirmation: false,
+        contextNeeded: [],
+      };
+    }
+
+    // Default to general chat
+    return {
+      primaryAction: "general_chat",
+      confidence: 0.5,
+      parameters: { text },
+      requiresConfirmation: false,
+      contextNeeded: [],
+    };
   }
 
   private async execute(

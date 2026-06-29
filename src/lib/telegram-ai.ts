@@ -64,7 +64,6 @@ export async function callAI(systemPrompt: string, userMessage: string, maxToken
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!baseUrl || !model || !apiKey) {
-    console.error("[telegram-ai] Missing env vars");
     return null;
   }
 
@@ -89,14 +88,12 @@ export async function callAI(systemPrompt: string, userMessage: string, maxToken
     });
 
     if (!response.ok) {
-      console.error(`[telegram-ai] API ${response.status}`);
       return null;
     }
 
     const data = await response.json();
     return data.choices?.[0]?.message?.content || null;
-  } catch (err) {
-    console.error("[telegram-ai] API failed:", err);
+  } catch {
     return null;
   }
 }
@@ -443,7 +440,6 @@ async function callVisionAI(imageBase64: string, mimeType: string, caption?: str
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!baseUrl || !model || !apiKey) {
-    console.error("[telegram-ai] Missing env vars for vision");
     return null;
   }
 
@@ -477,14 +473,12 @@ async function callVisionAI(imageBase64: string, mimeType: string, caption?: str
     });
 
     if (!response.ok) {
-      console.error(`[telegram-ai] Vision API ${response.status}`);
       return null;
     }
 
     const data = await response.json();
     return data.choices?.[0]?.message?.content || null;
-  } catch (err) {
-    console.error("[telegram-ai] Vision API failed:", err);
+  } catch {
     return null;
   }
 }
@@ -507,7 +501,6 @@ export async function analyzeDocumentImage(imageBase64: string, mimeType: string
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
     };
   } catch {
-    console.error("[telegram-ai] Failed to parse vision response:", raw);
     return null;
   }
 }
