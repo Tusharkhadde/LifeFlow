@@ -58,7 +58,7 @@ interface ExtractedEntities {
 
 // ---- AI call ----
 
-async function callAI(systemPrompt: string, userMessage: string, maxTokens: number, temperature: number, modelOverride?: string): Promise<string | null> {
+export async function callAI(systemPrompt: string, userMessage: string, maxTokens: number, temperature: number, modelOverride?: string): Promise<string | null> {
   const baseUrl = process.env.OPENAI_BASE_URL;
   const model = modelOverride || process.env.OPENAI_MODEL;
   const apiKey = process.env.OPENAI_API_KEY;
@@ -523,6 +523,7 @@ const telegramAI = {
   getDefaultVisionModel,
   getModelInfo,
   resolveVisionModel,
+  callAI,
   AVAILABLE_MODELS,
 };
 
