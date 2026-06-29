@@ -12,6 +12,8 @@ import {
   createGoal,
   queryMemory,
   storeMemory,
+  MemoryEntry,
+  ActionParams,
 } from "@/lib/agent-actions";
 
 export type ActionType =
@@ -36,7 +38,7 @@ export interface Message {
 export interface Plan {
   primaryAction: ActionType;
   confidence: number;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   requiresConfirmation: boolean;
   contextNeeded: string[];
 }
@@ -44,7 +46,7 @@ export interface Plan {
 export interface ExecutionResult {
   success: boolean;
   message: string;
-  data?: any;
+  data?: unknown;
   followUpQuestions?: string[];
 }
 
@@ -85,23 +87,23 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       // 2. Plan - Use AI to understand intent
       const plan = await this.createPlan(message.text, userId, user);
 
-      if (plan.confidence < 0.5 && plan.action !== "general_chat") {
+      if (plan.confidence < 0.5 && plan.primaryAction !== "general_chat") {
         return {
           success: false,
           message: "I didn't quite understand that. Could you rephrase?",
-          followUpQuestions: plan.clarifications,
+          followUpQuestions: plan.contextNeeded,
         };
       }
 
       // 3. Memory - Store and retrieve context
-      await storeMemory(userId, message.text, plan.action);
-      const relatedMemory = await queryMemory(userId, plan.action);
+      await storeMemory(userId, message.text, plan.primaryAction);
+      const relatedMemory = await queryMemory(userId, plan.primaryAction);
 
       // 4. Execute
       const result = await this.execute(plan, userId, message, relatedMemory);
 
       return result;
-    } catch (error) {
+    } catch (_error) {
       return {
         success: false,
         message: "Something went wrong. Please try again later.",
@@ -112,7 +114,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   private async createPlan(
     text: string,
     userId: string,
-    user: any
+    user: { name?: string | null; language?: string | null }
   ): Promise<Plan> {
     const userContext = `
 User: ${user.name || "Friend"}
@@ -142,7 +144,7 @@ Today's date: ${new Date().toLocaleDateString()}
         requiresConfirmation: parsed.requiresConfirmation,
         contextNeeded: parsed.clarifications || [],
       };
-    } catch (e) {
+    } catch (_e) {
       // Silent fail - use fallback
       return this.fallbackPlan(text);
     }
@@ -203,9 +205,9 @@ Today's date: ${new Date().toLocaleDateString()}
     plan: Plan,
     userId: string,
     message: Message,
-    memory: any[]
+    memory: MemoryEntry[]
   ): Promise<ExecutionResult> {
-    const params = plan.parameters;
+    const params = plan.parameters as ActionParams;
 
     switch (plan.primaryAction) {
       case "create_task":
@@ -242,7 +244,7 @@ Today's date: ${new Date().toLocaleDateString()}
 
   private async handleCalendarQuery(
     userId: string,
-    params: any
+    _params: unknown
   ): Promise<ExecutionResult> {
     const reminders = await prisma.reminder.findMany({
       where: { userId, completed: false },
@@ -259,7 +261,7 @@ Today's date: ${new Date().toLocaleDateString()}
 
   private async handleSummary(
     userId: string,
-    chatId: number
+    _chatId: number
   ): Promise<ExecutionResult> {
     const tasks = await prisma.task.count({
       where: { userId, completed: false },
@@ -284,7 +286,7 @@ Today's date: ${new Date().toLocaleDateString()}
   private async handleGeneralChat(
     text: string,
     userId: string,
-    memory: any[]
+    memory: MemoryEntry[]
   ): Promise<ExecutionResult> {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const tasks = await prisma.task.count({
@@ -314,8 +316,8 @@ Keep responses natural and helpful.`;
 
   private async handleKnowledgeBase(
     userId: string,
-    params: any,
-    memory: any[]
+    _params: unknown,
+    memory: MemoryEntry[]
   ): Promise<ExecutionResult> {
     const documents = await prisma.document.findMany({
       where: { userId },

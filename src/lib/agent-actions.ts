@@ -11,7 +11,7 @@ import { parseISO, addDays, addWeeks, addMonths } from "date-fns";
 
 // ==================== MEMORY SYSTEM ====================
 
-interface MemoryEntry {
+export interface MemoryEntry {
   id: string;
   userId: string;
   content: string;
@@ -63,11 +63,30 @@ export async function clearMemory(userId: string): Promise<void> {
   memoryStore.delete(userId);
 }
 
+export interface ActionParams {
+  title?: string;
+  text?: string;
+  description?: string;
+  category?: string;
+  urgency?: string;
+  dueDate?: string;
+  amount?: string | number;
+  value?: string | number;
+  date?: string;
+  datetime?: string;
+  timeExpression?: string;
+  recurrence?: string;
+  target?: string | number;
+  unit?: string;
+  deadline?: string;
+  frequency?: string;
+}
+
 // ==================== TASK MANAGER ====================
 
 export async function createTask(
   userId: string,
-  params: any,
+  params: ActionParams,
   chatId: number
 ): Promise<ExecutionResult> {
   try {
@@ -90,7 +109,7 @@ export async function createTask(
       message,
       data: task,
     };
-  } catch (error) {
+  } catch (_error) {
     // Don't log errors to avoid exposing data
     return {
       success: false,
@@ -103,11 +122,11 @@ export async function createTask(
 
 export async function createExpense(
   userId: string,
-  params: any,
+  params: ActionParams,
   chatId: number
 ): Promise<ExecutionResult> {
   try {
-    const amount = parseFloat(params.amount || params.value || "0");
+    const amount = parseFloat(String(params.amount ?? params.value ?? "0"));
     if (amount <= 0) {
       return {
         success: false,
@@ -145,7 +164,7 @@ export async function createExpense(
       message,
       data: expense,
     };
-  } catch (error) {
+  } catch (_error) {
     return {
       success: false,
       message: "Failed to log expense. Please try again.",
@@ -157,7 +176,7 @@ export async function createExpense(
 
 export async function createReminder(
   userId: string,
-  params: any,
+  params: ActionParams,
   chatId: number
 ): Promise<ExecutionResult> {
   try {
@@ -197,7 +216,7 @@ export async function createReminder(
       message,
       data: reminder,
     };
-  } catch (error) {
+  } catch (_error) {
     return {
       success: false,
       message: "Failed to create reminder. Please try again.",
@@ -209,7 +228,7 @@ export async function createReminder(
 
 export async function createGoal(
   userId: string,
-  params: any,
+  params: ActionParams,
   chatId: number
 ): Promise<ExecutionResult> {
   try {
@@ -219,7 +238,7 @@ export async function createGoal(
         title: params.title || params.text || "New Goal",
         description: params.description,
         category: params.category || "personal",
-        target: params.target ? parseFloat(params.target) : null,
+        target: params.target ? parseFloat(String(params.target)) : null,
         unit: params.unit,
         deadline: parseDateParam(params.deadline),
         frequency: params.frequency || null,
@@ -234,7 +253,7 @@ export async function createGoal(
       message,
       data: goal,
     };
-  } catch (error) {
+  } catch (_error) {
     return {
       success: false,
       message: "Failed to create goal. Please try again.",
@@ -247,7 +266,7 @@ export async function createGoal(
 export async function planUserRequest(
   userId: string,
   userMessage: string
-): Promise<any> {
+): Promise<Record<string, unknown> | null> {
   const prompt = `Break down this user request into actionable steps. Consider calendar, reminders, tasks, expenses.
 
 Request: "${userMessage}"
@@ -270,7 +289,7 @@ Respond with JSON:
 
     if (!response) return null;
     return JSON.parse(response);
-  } catch (e) {
+  } catch (_e) {
     return null;
   }
 }
@@ -301,7 +320,7 @@ export async function searchDocuments(
       message: `Found ${documents.length} documents`,
       data: documents,
     };
-  } catch (error) {
+  } catch (_error) {
     return {
       success: false,
       message: "Failed to search documents. Please try again.",
@@ -311,20 +330,21 @@ export async function searchDocuments(
 
 // ==================== HELPERS ====================
 
-function parseDateParam(dateString?: string): Date | null {
+function parseDateParam(dateString?: string | number | null): Date | null {
   if (!dateString) return null;
+  const str = String(dateString);
 
   try {
     // Try ISO date first
-    const parsed = parseISO(dateString);
+    const parsed = parseISO(str);
     if (!isNaN(parsed.getTime())) return parsed;
-  } catch (e) {
+  } catch (_e) {
     // Fall through
   }
 
   // Try parsing as relative date like "tomorrow", "next week"
   const now = new Date();
-  const lower = dateString.toLowerCase();
+  const lower = str.toLowerCase();
 
   if (lower === "today") return now;
   if (lower === "tomorrow") return addDays(now, 1);
@@ -342,9 +362,11 @@ function parseDateParam(dateString?: string): Date | null {
   return null;
 }
 
-function parseNaturalDate(expression: string): Date | null {
+function parseNaturalDate(expression: string | number | null | undefined): Date | null {
+  if (!expression) return null;
   const now = new Date();
-  const lower = expression.toLowerCase().trim();
+  const str = String(expression);
+  const lower = str.toLowerCase().trim();
 
   // Simple cases
   if (lower === "now") return now;
@@ -354,7 +376,7 @@ function parseNaturalDate(expression: string): Date | null {
   if (lower === "in 30 minutes") return new Date(now.getTime() + 1800000);
 
   // Match patterns like "tomorrow at 3pm", "next monday 2pm"
-  const timeMatch = expression.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
+  const timeMatch = str.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
   if (timeMatch) {
     const result = new Date(now);
     let hour = parseInt(timeMatch[1]);

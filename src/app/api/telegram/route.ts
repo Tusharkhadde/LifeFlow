@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
 import telegramAI from "@/lib/telegram-ai";
 import { agentRouter } from "@/lib/agent-router";
-const { handleMessage, analyzeDocumentImage, AVAILABLE_MODELS, getModelInfo, getDefaultModel } = telegramAI;
+const { analyzeDocumentImage, AVAILABLE_MODELS, getModelInfo, getDefaultModel } = telegramAI;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -476,7 +476,7 @@ ${lines.join("\n")}`
     });
 
     const userId = telegramLink?.userId || "";
-    const preferredModel = telegramLink?.preferredModel || undefined;
+    const _preferredModel = telegramLink?.preferredModel || undefined;
 
     // Commands that require auth
     const authCommands = ["/tasks", "/expenses", "/goals", "/reminders", "/summary", "/history"];
