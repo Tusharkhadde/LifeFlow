@@ -130,6 +130,20 @@ export function localExtract(message: string): ExtractedEntities | null {
     };
   }
 
+  // Automatic due-date reminder creation from direct due statements
+  const dueStatement = lower.match(/(?:due date is|due on|due by|bill due|is due|due tomorrow|due today|due next week)\b/);
+  if (dueStatement) {
+    const titleText = lower.replace(/(?:due date is|due on|due by|bill due|is due|due tomorrow|due today|due next week).*/g, "").trim();
+    const title = cap(cleanupReminderTitle(titleText || "Reminder"));
+    return {
+      hasEntities: true,
+      tasks: [],
+      expenses: [],
+      goals: [],
+      reminders: [{ title, datetime: parseDate(lower), category: "general" }],
+    };
+  }
+
   // Task: "need to X", "have to X", "todo: X"
   const taskMatch = lower.match(/(?:need to|have to|must|todo:?|task:?|i should|i gotta)\s+(.+)/);
   if (taskMatch || (lower.includes(" by ") && !lower.includes("save"))) {
@@ -349,29 +363,44 @@ export async function handleMessage(message: string, userId: string, modelOverri
   if (localEntities?.hasEntities) {
     const result = await saveEntities(userId, localEntities, reminders, tasks);
     if (result.created.length > 0) {
-      let response = `Done! Saved: ${result.created.join(", ")}`;
+      const assistantReplies: string[] = [];
 
-      // Warn about similar existing reminders
+      if (localEntities.reminders.length > 0) {
+        for (const reminder of localEntities.reminders) {
+          const when = reminder.datetime
+            ? new Date(reminder.datetime).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
+            : "soon";
+          assistantReplies.push(`Got it. I set a reminder for ${reminder.title} on ${when}.`);
+        }
+      }
+
+      if (localEntities.tasks.length > 0) {
+        const taskTitles = localEntities.tasks.map((t) => t.title).join(", ");
+        assistantReplies.push(`Done — I added your task${localEntities.tasks.length > 1 ? "s" : ""}: ${taskTitles}.`);
+      }
+
+      if (localEntities.expenses.length > 0) {
+        const expenseTotals = localEntities.expenses.map((e) => `₹${e.amount.toLocaleString()}`).join(", ");
+        const expenseLabel = localEntities.expenses.length > 1 ? "expenses" : "expense";
+        assistantReplies.push(`Logged your ${expenseLabel}: ${expenseTotals}.`);
+      }
+
+      if (localEntities.goals.length > 0) {
+        const goalTitles = localEntities.goals.map((g) => g.title).join(", ");
+        const goalLabel = localEntities.goals.length > 1 ? "goals" : "goal";
+        assistantReplies.push(`Nice! I saved your ${goalLabel}: ${goalTitles}.`);
+      }
+
       if (result.relatedReminders.length > 0) {
-        response += `\n\nYou also have similar reminders:\n${result.relatedReminders.map((r) => `- ${r}`).join("\n")}`;
+        assistantReplies.push(`FYI, you also have similar reminders: ${result.relatedReminders.join(", ")}.`);
       }
 
-      // Warn about similar existing tasks
       if (result.relatedTasks.length > 0) {
-        response += `\n\nRelated tasks you already have:\n${result.relatedTasks.map((t) => `- ${t}`).join("\n")}`;
+        assistantReplies.push(`I found similar tasks already on your list: ${result.relatedTasks.join(", ")}.`);
       }
 
-      // Show all pending reminders if user just added one
-      if (localEntities.reminders.length > 0 && reminders.length > 0) {
-        const upcoming = reminders
-          .slice(0, 5)
-          .map((r) => `- ${r.title} (${new Date(r.datetime).toLocaleDateString()})`)
-          .join("\n");
-        response += `\n\nAll your pending reminders:\n${upcoming}`;
-      }
-
-      response += "\n\nWhat else?";
-      return response;
+      assistantReplies.push("Anything else I can help with?");
+      return assistantReplies.join(" ");
     }
   }
 
