@@ -16,7 +16,7 @@ const tests = [
       assert(result?.hasEntities === true, "expected reminder extraction to succeed");
       assert(result?.reminders?.length === 1, "expected one reminder");
       assert(result!.reminders[0].title.toLowerCase().includes("pay my openai bill"), "expected reminder title to include bill text");
-      assert(result!.reminders[0].datetime?.includes("T17:00:00"), `expected time 17:00 got ${result!.reminders[0].datetime}`);
+      assert(result!.reminders[0].datetime!.includes("T17:00:00"), `expected time 17:00 got ${result!.reminders[0].datetime}`);
     },
   },
   {
