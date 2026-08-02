@@ -16,6 +16,7 @@ datasource db {
     language        String    @default("en")
     username        String?   @unique
     displayUsername String?
+    monthlyBudget   Float     @default(25000)
     createdAt       DateTime  @default(now())
     updatedAt       DateTime  @updatedAt
     tasks        Task[]
@@ -126,6 +127,7 @@ model Expense {
   description String?
   date        DateTime @default(now())
   source      String   @default("manual")
+  type        String   @default("expense")
   receiptUrl  String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

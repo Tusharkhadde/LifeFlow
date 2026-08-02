@@ -5,12 +5,19 @@ import { getAuthenticatedUserId } from "@/lib/auth-helpers";
 export async function GET(request: NextRequest) {
   try {
     const userId = await getAuthenticatedUserId(request.headers);
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get("type");
+
     const expenses = await prisma.expense.findMany({
-      where: { userId },
+      where: {
+        userId,
+        ...(type ? { type } : {}),
+      },
       orderBy: { date: "desc" },
     });
     return NextResponse.json({ expenses });
-  } catch {
+  } catch (error) {
+    console.error("GET /api/expenses error:", error);
     return NextResponse.json({ error: "Failed to fetch expenses" }, { status: 500 });
   }
 }
@@ -19,7 +26,7 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await getAuthenticatedUserId(request.headers);
     const body = await request.json();
-    const { amount, category, description, date, source } = body;
+    const { amount, category, description, date, source, type } = body;
 
     if (!amount || !category) {
       return NextResponse.json({ error: "Amount and category are required" }, { status: 400 });
@@ -33,11 +40,13 @@ export async function POST(request: NextRequest) {
         description: description || null,
         date: date ? new Date(date) : new Date(),
         source: source || "manual",
+        type: type || "expense",
       },
     });
 
     return NextResponse.json({ expense }, { status: 201 });
-  } catch {
+  } catch (error) {
+    console.error("POST /api/expenses error:", error);
     return NextResponse.json({ error: "Failed to create expense" }, { status: 500 });
   }
 }
@@ -53,7 +62,8 @@ export async function DELETE(request: NextRequest) {
 
     await prisma.expense.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    console.error("DELETE /api/expenses error:", error);
     return NextResponse.json({ error: "Failed to delete expense" }, { status: 500 });
   }
 }
