@@ -512,12 +512,14 @@ ${lines.join("\n")}`
       chatId,
     });
 
-    if (!routerResult.success) {
+    // Always send the agent's reply back (success or failure)
+    if (routerResult.message) {
       await sendTelegramMessage(chatId, routerResult.message);
-      if (routerResult.followUpQuestions && routerResult.followUpQuestions.length > 0) {
-        await sendTelegramMessage(chatId, `*Questions:*\n${routerResult.followUpQuestions.map(q => `• ${q}`).join("\n")}`);
-      }
     }
+    if (!routerResult.success && routerResult.followUpQuestions && routerResult.followUpQuestions.length > 0) {
+      await sendTelegramMessage(chatId, `*Questions:*\n${routerResult.followUpQuestions.map(q => `• ${q}`).join("\n")}`);
+    }
+
 
     return NextResponse.json({ ok: true });
   } catch (error) {
