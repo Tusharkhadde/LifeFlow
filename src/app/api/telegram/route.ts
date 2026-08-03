@@ -46,7 +46,7 @@ async function handleLinkCode(
   firstName: string
 ): Promise<void> {
   const existingLink = await prisma.telegramLink.findUnique({
-    where: { telegramUserId },
+    where: { telegramUserId: BigInt(telegramUserId) },
   });
 
   if (existingLink) {
@@ -67,7 +67,7 @@ async function handleLinkCode(
   await prisma.telegramLink.create({
     data: {
       userId: linkCode.userId,
-      telegramUserId,
+      telegramUserId: BigInt(telegramUserId),
       telegramName: firstName,
     },
   });
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
       const chatId = msg.chat.id;
       const caption = msg.caption;
 
-      const telegramLink = await prisma.telegramLink.findUnique({ where: { telegramUserId } });
+      const telegramLink = await prisma.telegramLink.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
       const userId = telegramLink?.userId;
 
       if (!userId) {
@@ -188,6 +188,18 @@ export async function POST(request: NextRequest) {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
+    // Auto-detect if user sent a raw link code (e.g. 6-12 digit/alphanumeric code) without /link prefix
+    if (!text.startsWith("/")) {
+      const candidateCode = text.replace(/[\s-]/g, "");
+      if (candidateCode.length >= 6 && candidateCode.length <= 16) {
+        const linkCodeRecord = await prisma.linkCode.findUnique({ where: { code: candidateCode } });
+        if (linkCodeRecord && linkCodeRecord.expiresAt > new Date()) {
+          await handleLinkCode(chatId, telegramUserId, candidateCode, msg.from.first_name);
+          return NextResponse.json({ ok: true });
+        }
+      }
+    }
+
     // Handle /start with deep link payload
     if (text.startsWith("/start")) {
       const payload = text.replace("/start", "").trim();
@@ -229,12 +241,12 @@ export async function POST(request: NextRequest) {
     // Handle /unlink
     if (text === "/unlink") {
       const link = await prisma.telegramLink.findUnique({
-        where: { telegramUserId },
+        where: { telegramUserId: BigInt(telegramUserId) },
       });
       if (!link) {
         await sendTelegramMessage(chatId, "You're not linked yet.");
       } else {
-        await prisma.telegramLink.delete({ where: { telegramUserId } });
+        await prisma.telegramLink.delete({ where: { telegramUserId: BigInt(telegramUserId) } });
         await sendTelegramMessage(chatId, "Account unlinked. Your data is still safe in LifeFlow.");
       }
       return NextResponse.json({ ok: true });
@@ -242,7 +254,7 @@ export async function POST(request: NextRequest) {
 
     // Handle /models — list available models
     if (text === "/models") {
-      const link = await prisma.telegramLink.findUnique({ where: { telegramUserId } });
+      const link = await prisma.telegramLink.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
       const current = link?.preferredModel || getDefaultModel();
       const currentInfo = getModelInfo(current);
       let response = `*Available Models:*\n\n`;
@@ -264,7 +276,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      const link = await prisma.telegramLink.findUnique({ where: { telegramUserId } });
+      const link = await prisma.telegramLink.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
       if (!link) {
         await sendTelegramMessage(chatId, "You're not linked yet! Send /link <code> first.");
         return NextResponse.json({ ok: true });
@@ -278,7 +290,7 @@ export async function POST(request: NextRequest) {
       }
 
       await prisma.telegramLink.update({
-        where: { telegramUserId },
+        where: { telegramUserId: BigInt(telegramUserId) },
         data: { preferredModel: modelInfo.id },
       });
 
@@ -288,7 +300,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Authenticated command shortcuts
-    const link = await prisma.telegramLink.findUnique({ where: { telegramUserId } });
+    const link = await prisma.telegramLink.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
     const linkedUserId = link?.userId || "";
     const authCommandList = ["/tasks", "/expenses", "/goals", "/reminders", "/summary", "/history"];
 
@@ -472,7 +484,7 @@ ${lines.join("\n")}`
 
     // Look up linked user
     const telegramLink = await prisma.telegramLink.findUnique({
-      where: { telegramUserId },
+      where: { telegramUserId: BigInt(telegramUserId) },
     });
 
     const userId = telegramLink?.userId || "";

@@ -2,6 +2,7 @@ import { StateGraph, Annotation, END } from "@langchain/langgraph";
 import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
 import { ALL_TOOLS_DEFINITIONS, TOOL_DISPATCH, withRetry } from "@/lib/agent-tools";
 import { prisma } from "@/lib/db";
+import telegramAI from "@/lib/telegram-ai";
 
 // State annotation for LangGraph Agent
 const AgentStateAnnotation = Annotation.Root({
@@ -41,7 +42,7 @@ async function callLLMWithTools(
   modelOverride?: string
 ) {
   const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = modelOverride || process.env.OPENAI_MODEL || "meta-llama/llama-3.2-11b-vision-instruct:free";
+  const model = modelOverride || process.env.OPENAI_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -244,10 +245,19 @@ export async function runLangGraphAssistant(params: {
       message: finalReply,
     };
   } catch (error) {
-    console.error("[LangGraph Assistant Error]", error);
-    return {
-      success: false,
-      message: "An unexpected error occurred. Please try again.",
-    };
+    console.error("[LangGraph Assistant Error, switching to fallback]", error);
+    try {
+      const fallbackReply = await telegramAI.handleMessage(params.text, params.userId);
+      return {
+        success: true,
+        message: fallbackReply,
+      };
+    } catch (fallbackErr) {
+      console.error("[Fallback Error]", fallbackErr);
+      return {
+        success: false,
+        message: "I'm having trouble processing that right now. Please try again in a moment.",
+      };
+    }
   }
 }

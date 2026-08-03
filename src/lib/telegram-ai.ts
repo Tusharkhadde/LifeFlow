@@ -10,19 +10,18 @@ export interface ModelInfo {
 }
 
 export const AVAILABLE_MODELS: ModelInfo[] = [
+  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B", supportsVision: false, isFree: true },
+  { id: "qwen/qwen-2.5-72b-instruct:free", name: "Qwen 2.5 72B", supportsVision: false, isFree: true },
   { id: "meta-llama/llama-3.2-11b-vision-instruct:free", name: "Llama 3.2 Vision 11B", supportsVision: true, isFree: true },
-  { id: "qwen/qwen2-vl-7b-instruct:free", name: "Qwen2-VL 7B", supportsVision: true, isFree: true },
-  { id: "google/gemma-4-26b-a4b-it:free", name: "Gemma 4 26B", supportsVision: false, isFree: true },
-  { id: "mistralai/mistral-small-3.1-24b-instruct:free", name: "Mistral Small 3.1 24B", supportsVision: false, isFree: true },
-  { id: "microsoft/phi-3.5-vision-instruct:free", name: "Phi-3.5 Vision", supportsVision: true, isFree: true },
+  { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1", supportsVision: false, isFree: true },
 ];
 
 export function getDefaultModel(): string {
-  return process.env.OPENAI_MODEL || AVAILABLE_MODELS[0].id;
+  return process.env.OPENAI_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
 }
 
 export function getDefaultVisionModel(): string {
-  return process.env.OPENAI_VISION_MODEL || AVAILABLE_MODELS.find(m => m.supportsVision)?.id || getDefaultModel();
+  return process.env.OPENAI_VISION_MODEL || "meta-llama/llama-3.2-11b-vision-instruct:free";
 }
 
 export function getModelInfo(modelId: string): ModelInfo | undefined {
