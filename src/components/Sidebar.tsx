@@ -3,17 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/components/LanguageProvider";
-import { t } from "@/lib/i18n";
 import { useSession, signOut } from "@/lib/auth-client";
 import {
-  LayoutDashboard,
-  FileText,
-  Receipt,
-  Target,
-  Bell,
-  Bot,
-  Lightbulb,
+  Brain,
+  Sparkles,
   Settings,
   Menu,
   X,
@@ -25,21 +18,15 @@ import {
 import { useState, useEffect } from "react";
 
 const navItems = [
-  { key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { key: "documents", href: "/documents", icon: FileText },
-  { key: "expenses", href: "/expenses", icon: Receipt },
-  { key: "goals", href: "/goals", icon: Target },
-  { key: "reminders", href: "/reminders", icon: Bell },
-  { key: "assistant", href: "/assistant", icon: Bot },
-  { key: "insights", href: "/insights", icon: Lightbulb },
-  { key: "settings", href: "/settings", icon: Settings },
+  { key: "dashboard", label: "Knowledge Vault", href: "/dashboard", icon: Brain },
+  { key: "assistant", label: "Ask AI Brain", href: "/assistant", icon: Sparkles },
+  { key: "settings", label: "Settings", href: "/settings", icon: Settings },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "lifeflow-sidebar-collapsed";
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { language } = useLanguage();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = useSession();
@@ -100,7 +87,7 @@ export function Sidebar() {
           </div>
           {!collapsed && (
             <p className="text-xs text-muted-foreground mt-1">
-              {t("tagline", language)}
+              AI Second Brain & Knowledge Vault
             </p>
           )}
         </div>
@@ -123,7 +110,7 @@ export function Sidebar() {
                 key={item.key}
                 href={item.href}
                 onClick={() => setMobileOpen(false)}
-                title={collapsed ? t(item.key, language) : undefined}
+                title={collapsed ? item.label : undefined}
                 className={cn(
                   "flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-200",
                   collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5",
@@ -133,7 +120,7 @@ export function Sidebar() {
                 )}
               >
                 <item.icon size={18} className="flex-shrink-0" />
-                {!collapsed && <span>{t(item.key, language)}</span>}
+                {!collapsed && <span>{item.label}</span>}
               </Link>
             );
           })}
@@ -144,6 +131,7 @@ export function Sidebar() {
           <div className={cn("glass-card rounded-xl", collapsed ? "p-2" : "p-3")}>
             <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
               {user?.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={user.image}
                   alt={userName}

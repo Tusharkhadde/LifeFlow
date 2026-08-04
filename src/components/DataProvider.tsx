@@ -2,38 +2,18 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Task, Document, Expense, Goal, Reminder, Insight } from "@/lib/types";
+import { KnowledgeItem } from "@/lib/types";
 
 interface DataContextType {
-  tasks: Task[];
-  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
-  documents: Document[];
-  setDocuments: React.Dispatch<React.SetStateAction<Document[]>>;
-  expenses: Expense[];
-  setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
-  goals: Goal[];
-  setGoals: React.Dispatch<React.SetStateAction<Goal[]>>;
-  reminders: Reminder[];
-  setReminders: React.Dispatch<React.SetStateAction<Reminder[]>>;
-  insights: Insight[];
-  setInsights: React.Dispatch<React.SetStateAction<Insight[]>>;
+  knowledgeItems: KnowledgeItem[];
+  setKnowledgeItems: React.Dispatch<React.SetStateAction<KnowledgeItem[]>>;
   loading: boolean;
   refreshAll: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType>({
-  tasks: [],
-  setTasks: () => {},
-  documents: [],
-  setDocuments: () => {},
-  expenses: [],
-  setExpenses: () => {},
-  goals: [],
-  setGoals: () => {},
-  reminders: [],
-  setReminders: () => {},
-  insights: [],
-  setInsights: () => {},
+  knowledgeItems: [],
+  setKnowledgeItems: () => {},
   loading: true,
   refreshAll: async () => {},
 });
@@ -47,12 +27,7 @@ async function fetchJSON<T>(url: string): Promise<T> {
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [insights, setInsights] = useState<Insight[]>([]);
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [shouldRedirect, setShouldRedirect] = useState(false);
@@ -60,32 +35,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [taskRes, docRes, expRes, goalRes, remRes, insRes] = await Promise.allSettled([
-        fetchJSON<{ tasks: Task[] }>("/api/tasks"),
-        fetchJSON<{ documents: Document[] }>("/api/documents"),
-        fetchJSON<{ expenses: Expense[] }>("/api/expenses"),
-        fetchJSON<{ goals: Goal[] }>("/api/goals"),
-        fetchJSON<{ reminders: Reminder[] }>("/api/reminders"),
-        fetchJSON<{ insights: Insight[] }>("/api/insights"),
-      ]);
-
-      // Check if any request was unauthorized
-      const anyUnauthorized = [taskRes, docRes, expRes, goalRes, remRes, insRes].some(
-        (r) => r.status === "rejected" && r.reason?.message === "UNAUTHORIZED"
-      );
-      if (anyUnauthorized) {
-        setShouldRedirect(true);
-        return;
+      const res = await fetchJSON<{ items: KnowledgeItem[] }>("/api/knowledge");
+      if (res?.items) {
+        setKnowledgeItems(res.items);
       }
-
-      if (taskRes.status === "fulfilled") setTasks(taskRes.value.tasks);
-      if (docRes.status === "fulfilled") setDocuments(docRes.value.documents);
-      if (expRes.status === "fulfilled") setExpenses(expRes.value.expenses);
-      if (goalRes.status === "fulfilled") setGoals(goalRes.value.goals);
-      if (remRes.status === "fulfilled") setReminders(remRes.value.reminders);
-      if (insRes.status === "fulfilled") setInsights(insRes.value.insights);
-    } catch {
-      // Silently fail - show empty states
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        setShouldRedirect(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -108,16 +65,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [shouldRedirect, router]);
 
   return (
-    <DataContext.Provider value={{
-      tasks, setTasks,
-      documents, setDocuments,
-      expenses, setExpenses,
-      goals, setGoals,
-      reminders, setReminders,
-      insights, setInsights,
-      loading: loading && !mounted,
-      refreshAll,
-    }}>
+    <DataContext.Provider
+      value={{
+        knowledgeItems,
+        setKnowledgeItems,
+        loading: loading && !mounted,
+        refreshAll,
+      }}
+    >
       {children}
     </DataContext.Provider>
   );

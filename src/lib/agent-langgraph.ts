@@ -1,8 +1,8 @@
 import { StateGraph, Annotation, END } from "@langchain/langgraph";
 import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
-import { ALL_TOOLS_DEFINITIONS, TOOL_DISPATCH, withRetry } from "@/lib/agent-tools";
+import { ALL_TOOLS_DEFINITIONS, TOOL_DISPATCH } from "@/lib/agent-tools";
 import { prisma } from "@/lib/db";
-import telegramAI from "@/lib/telegram-ai";
+import { manageContextWindow, ChatMessageItem } from "@/lib/context-manager";
 
 // State annotation for LangGraph Agent
 const AgentStateAnnotation = Annotation.Root({
@@ -13,87 +13,95 @@ const AgentStateAnnotation = Annotation.Root({
   userId: Annotation<string>(),
   telegramUserId: Annotation<number>(),
   chatId: Annotation<number>(),
-  userContext: Annotation<Record<string, unknown>>({
-    reducer: (x, y) => ({ ...x, ...y }),
-    default: () => ({}),
-  }),
   finalResponse: Annotation<string>(),
+  summaryMemory: Annotation<string | null>({
+    reducer: (x, y) => y ?? x ?? null,
+    default: () => null,
+  }),
 });
 
 export type AgentStateType = typeof AgentStateAnnotation.State;
 
-// Simple in-memory history store per Telegram user (stores last 20 messages)
 const conversationHistoryStore = new Map<number, BaseMessage[]>();
+const conversationSummaryStore = new Map<number, string>();
 
 export function getConversationHistory(telegramUserId: number): BaseMessage[] {
   return conversationHistoryStore.get(telegramUserId) || [];
 }
 
-export function saveConversationHistory(telegramUserId: number, messages: BaseMessage[]) {
+export function saveConversationHistory(
+  telegramUserId: number,
+  messages: BaseMessage[],
+  summary?: string | null
+) {
   const existing = conversationHistoryStore.get(telegramUserId) || [];
-  const updated = [...existing, ...messages].slice(-20); // Keep last 20 messages for context
+  const updated = [...existing, ...messages].slice(-15);
   conversationHistoryStore.set(telegramUserId, updated);
+  if (summary) {
+    conversationSummaryStore.set(telegramUserId, summary);
+  }
 }
 
-// Call LLM with native tool calling
 async function callLLMWithTools(
   messages: BaseMessage[],
   systemPrompt: string,
-  modelOverride?: string
+  existingSummary: string | null = null
 ) {
   const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = modelOverride || process.env.OPENAI_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+  const model = process.env.OPENAI_MODEL || "google/gemma-4-26b-a4b-it:free";
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not set in environment");
   }
 
-  const formattedMessages = [
-    { role: "system", content: systemPrompt },
-    ...messages.map((msg) => {
-      if (msg instanceof HumanMessage) return { role: "user", content: msg.content.toString() };
-      if (msg instanceof AIMessage) {
-        const item: Record<string, unknown> = { role: "assistant", content: msg.content.toString() };
-        if (msg.additional_kwargs?.tool_calls) {
-          item.tool_calls = msg.additional_kwargs.tool_calls;
-        }
-        return item;
+  // Convert BaseMessage items to ChatMessageItem format
+  const rawItems: ChatMessageItem[] = messages.map((msg) => {
+    if (msg instanceof HumanMessage) return { role: "user", content: msg.content.toString() };
+    if (msg instanceof AIMessage) {
+      const item: ChatMessageItem = { role: "assistant", content: msg.content.toString() };
+      if (msg.additional_kwargs?.tool_calls) {
+        item.tool_calls = msg.additional_kwargs.tool_calls as unknown[];
       }
-      return { role: "user", content: msg.content.toString() };
-    }),
-  ];
-
-  const payload = {
-    model,
-    messages: formattedMessages,
-    tools: ALL_TOOLS_DEFINITIONS,
-    tool_choice: "auto",
-    temperature: 0.2,
-  };
-
-  const response = await withRetry(async () => {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": "https://lifeflow-ai.vercel.app",
-        "X-OpenRouter-Title": "LifeFlow AI Assistant",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`LLM API returned status ${res.status}: ${errorText}`);
+      return item;
     }
-
-    return res.json();
+    return { role: "user", content: msg.content.toString() };
   });
 
-  const choice = response.choices?.[0]?.message;
-  return choice;
+  // Apply 32K Context Window Management & History Restoration
+  const { formattedMessages, updatedSummary } = await manageContextWindow(
+    rawItems,
+    systemPrompt,
+    existingSummary
+  );
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://lifeflow-ai.vercel.app",
+      "X-OpenRouter-Title": "LifeFlow AI Second Brain",
+    },
+    body: JSON.stringify({
+      model,
+      messages: formattedMessages,
+      tools: ALL_TOOLS_DEFINITIONS,
+      tool_choice: "auto",
+      temperature: 0.2,
+    }),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`LLM API returned status ${res.status}: ${errorText}`);
+  }
+
+  const data = await res.json();
+  return {
+    choice: data.choices?.[0]?.message,
+    updatedSummary,
+  };
 }
 
 // Node 1: Agent Reasoner Node
@@ -102,41 +110,26 @@ async function agentNode(state: AgentStateType) {
     where: { id: state.userId },
   });
 
-  const currentDate = new Date().toLocaleString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const systemPrompt = `You are LifeFlow AI Second Brain Assistant.
+You help the user save web links, notes, and query their saved knowledge vault.
 
-  const systemPrompt = `You are LifeFlow AI, an intelligent personal assistant on Telegram.
-You assist the user with managing expenses, income, budgets, tasks, reminders, goals, analytics, profile settings, and querying data.
-
-Current date & time: ${currentDate}
 User Name: ${user?.name || "Friend"}
-Monthly Budget: ₹${(user?.monthlyBudget || 25000).toLocaleString()}
 
-CRITICAL INSTRUCTIONS:
-1. Always analyze the user's input and select the most appropriate tool to call automatically.
-2. For expenses (e.g. "bought mouse for ₹2000", "spent 250 on coffee", "paid rent 18000"): Call createExpense(amount, category, description).
-3. For income (e.g. "salary credited 70000", "got freelance payment 5000"): Call createIncome(amount, category, description).
-4. For budget (e.g. "set monthly budget to 25000"): Call updateBudget(monthlyBudget).
-5. For reminders (e.g. "remind me to pay bill tomorrow at 5pm"): Call createReminder(title, datetime).
-6. For tasks (e.g. "need to file report by Friday"): Call createTask(title, category, urgency, dueDate).
-7. For goals (e.g. "save 50k for trip by Dec"): Call createGoal(title, target, deadline).
-8. For analytics (e.g. "show this month's expenses", "how much did I spend?"): Call getAnalytics() or searchExpenses().
-9. For searching expenses or DB query: Call searchExpenses() or queryDatabase().
-10. If essential information for a tool is completely missing (e.g. user says "add an expense" with no amount or item), ask a friendly clarification question instead of invoking the tool with invalid values.
-11. Generate warm, concise, human-like responses. Never use raw JSON in user responses.`;
+INSTRUCTIONS:
+1. If the user provides a web link or note to save: call saveKnowledgeItem(input).
+2. If the user asks a question about their saved resources (e.g. "website components", "React UI tools"): call searchKnowledgeVault(query).
+3. Be conversational, warm, and concise.`;
 
-  const llmResponse = await callLLMWithTools(state.messages, systemPrompt);
+  const { choice: llmResponse, updatedSummary } = await callLLMWithTools(
+    state.messages,
+    systemPrompt,
+    state.summaryMemory
+  );
 
   if (!llmResponse) {
     return {
-      messages: [new AIMessage("I'm sorry, I couldn't process your request right now. Please try again.")],
-      finalResponse: "I'm sorry, I couldn't process your request right now. Please try again.",
+      messages: [new AIMessage("I'm sorry, I couldn't process your request right now.")],
+      finalResponse: "I'm sorry, I couldn't process your request right now.",
     };
   }
 
@@ -150,6 +143,7 @@ CRITICAL INSTRUCTIONS:
 
   return {
     messages: [aiMessage],
+    summaryMemory: updatedSummary,
   };
 }
 
@@ -180,7 +174,7 @@ async function toolsNode(state: AgentStateType) {
 
     const handler = TOOL_DISPATCH[fnName];
     if (handler) {
-      const toolResult = await handler(state.userId, args, state.chatId);
+      const toolResult = await handler(state.userId, args);
       results.push(toolResult.message);
     } else {
       results.push(`Tool ${fnName} is not supported.`);
@@ -194,7 +188,6 @@ async function toolsNode(state: AgentStateType) {
   };
 }
 
-// Conditional Routing Logic
 function shouldContinue(state: AgentStateType) {
   const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
   const toolCalls = (lastMessage?.additional_kwargs?.tool_calls as Array<unknown>) || [];
@@ -204,7 +197,6 @@ function shouldContinue(state: AgentStateType) {
   return END;
 }
 
-// Build & Compile LangGraph StateGraph
 const workflow = new StateGraph(AgentStateAnnotation)
   .addNode("agent", agentNode)
   .addNode("tools", toolsNode)
@@ -217,7 +209,6 @@ const workflow = new StateGraph(AgentStateAnnotation)
 
 export const langGraphAssistant = workflow.compile();
 
-// High level assistant invocation interface
 export async function runLangGraphAssistant(params: {
   text: string;
   userId: string;
@@ -226,6 +217,7 @@ export async function runLangGraphAssistant(params: {
 }): Promise<{ success: boolean; message: string }> {
   try {
     const history = getConversationHistory(params.telegramUserId);
+    const existingSummary = conversationSummaryStore.get(params.telegramUserId) || null;
     const userMessage = new HumanMessage(params.text);
     const currentMessages = [...history, userMessage];
 
@@ -234,30 +226,29 @@ export async function runLangGraphAssistant(params: {
       userId: params.userId,
       telegramUserId: params.telegramUserId,
       chatId: params.chatId,
+      summaryMemory: existingSummary,
     });
 
-    const finalReply = result.finalResponse || result.messages[result.messages.length - 1]?.content?.toString() || "Processed successfully.";
+    const finalReply =
+      result.finalResponse ||
+      result.messages[result.messages.length - 1]?.content?.toString() ||
+      "Processed successfully.";
 
-    saveConversationHistory(params.telegramUserId, [userMessage, new AIMessage(finalReply)]);
+    saveConversationHistory(
+      params.telegramUserId,
+      [userMessage, new AIMessage(finalReply)],
+      result.summaryMemory
+    );
 
     return {
       success: true,
       message: finalReply,
     };
   } catch (error) {
-    console.error("[LangGraph Assistant Error, switching to fallback]", error);
-    try {
-      const fallbackReply = await telegramAI.handleMessage(params.text, params.userId);
-      return {
-        success: true,
-        message: fallbackReply,
-      };
-    } catch (fallbackErr) {
-      console.error("[Fallback Error]", fallbackErr);
-      return {
-        success: false,
-        message: "I'm having trouble processing that right now. Please try again in a moment.",
-      };
-    }
+    console.error("[LangGraph Assistant Error]", error);
+    return {
+      success: false,
+      message: "An unexpected error occurred. Please try again.",
+    };
   }
 }

@@ -1,421 +1,549 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useData } from "@/components/DataProvider";
-import { useLanguage } from "@/components/LanguageProvider";
-import { t } from "@/lib/i18n";
-import { getUrgencyTag, calculatePriorityScore, formatDate } from "@/lib/utils";
-import { AnimatedNumber } from "@/components/ui/animated-number";
-import { KineticTextLoader } from "@/components/ui/kinetic-text-loader";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  CheckCircle2,
-  Clock,
-  Pause,
-  Sparkles,
-  AlertTriangle,
-  Receipt,
-  Target,
-  Calendar,
+  Brain,
+  Link as LinkIcon,
   FileText,
-  RefreshCw,
-  Heart,
-  BookOpen,
-  Zap,
+  Search,
+  Sparkles,
+  Plus,
+  Star,
+  ExternalLink,
+  Trash2,
+  Tag as TagIcon,
+  MessageSquare,
+  Globe,
+  Loader2,
+  X,
+  Bookmark,
+  CheckCircle2,
 } from "lucide-react";
 
-const categoryIcons: Record<string, React.ElementType> = {
-  bill: Receipt,
-  document: FileText,
-  appointment: Calendar,
-  goal: Target,
-  subscription: RefreshCw,
-  health: Heart,
-  education: BookOpen,
-  general: Clock,
-  insurance: Shield,
-};
-
-function Shield(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-    </svg>
-  );
+export interface KnowledgeItem {
+  id: string;
+  title: string;
+  summary: string | null;
+  aiMemory: string | null;
+  type: "link" | "note" | "document" | "audio";
+  sourceUrl: string | null;
+  favicon: string | null;
+  category: string;
+  tags: string[] | null;
+  favorite: boolean;
+  archived: boolean;
+  createdAt: string;
 }
 
 export default function DashboardPage() {
-  const { tasks, expenses, goals, reminders, insights, loading, refreshAll } = useData();
-  const { language } = useLanguage();
-  const [generatingPlan, setGeneratingPlan] = useState(false);
-  const [generatedPlan, setGeneratedPlan] = useState<string[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const [items, setItems] = useState<KnowledgeItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [inputUrlOrNote, setInputUrlOrNote] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<string>("all");
+  const [askOpen, setAskOpen] = useState(false);
+  const [askQuestion, setAskQuestion] = useState("");
+  const [askLoading, setAskLoading] = useState(false);
+  const [askResponse, setAskResponse] = useState<string | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
 
-  useEffect(() => {
-    setMounted(true);
+  const fetchKnowledgeItems = useCallback(async () => {
+    try {
+      const res = await fetch("/api/knowledge");
+      if (res.ok) {
+        const data = await res.json();
+        setItems(data.items || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch knowledge items:", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const sortedTasks = [...tasks]
-    .filter((t) => !t.completed)
-    .sort((a, b) => calculatePriorityScore(b) - calculatePriorityScore(a));
+  useEffect(() => {
+    fetchKnowledgeItems();
+  }, [fetchKnowledgeItems]);
 
-  const todayTasks = sortedTasks.filter((t) => {
-    if (!t.dueDate) return false;
-    const days = Math.ceil((new Date(t.dueDate).getTime() - Date.now()) / 86400000);
-    return days <= 1;
-  });
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputUrlOrNote.trim()) return;
 
-  const totalExpensesThisMonth = expenses
-    .filter((e) => {
-      const d = new Date(e.date);
-      const now = new Date();
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, e) => sum + e.amount, 0);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: inputUrlOrNote.trim() }),
+      });
 
-  const activeGoals = goals.filter((g) => !g.completed);
-  const pendingReminders = reminders.filter((r) => !r.completed);
+      if (res.ok) {
+        const data = await res.json();
+        setItems((prev) => [data.item, ...prev]);
+        setInputUrlOrNote("");
+        setNotification(`Memory extracted & saved: "${data.item.title}"`);
+        setTimeout(() => setNotification(null), 4000);
+      }
+    } catch (err) {
+      console.error("Failed to save knowledge item:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-  const handleGenerateDay = async () => {
-    setGeneratingPlan(true);
-    await new Promise((r) => setTimeout(r, 2000));
-    const plan = sortedTasks.slice(0, 5).map((task) => {
-      const days = task.dueDate
-        ? Math.ceil((new Date(task.dueDate).getTime() - Date.now()) / 86400000)
-        : null;
-      let reason = "";
-      if (days !== null && days < 0) reason = `Overdue by ${Math.abs(days)} days - complete immediately`;
-      else if (days !== null && days <= 2) reason = `Due in ${days} day${days > 1 ? "s" : ""} - time-sensitive`;
-      else if (task.urgency === "high") reason = "High urgency task - important to address today";
-      else reason = "Scheduled for today based on your priorities";
-      return `${task.title} - ${reason}`;
+  const handleToggleFavorite = async (id: string, currentFav: boolean) => {
+    setItems((prev) =>
+      prev.map((it) => (it.id === id ? { ...it, favorite: !currentFav } : it))
+    );
+    try {
+      await fetch("/api/knowledge", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, favorite: !currentFav }),
+      });
+    } catch (err) {
+      console.error("Failed to update favorite status:", err);
+    }
+  };
+
+  const handleDeleteItem = async (id: string) => {
+    setItems((prev) => prev.filter((it) => it.id !== id));
+    try {
+      await fetch("/api/knowledge", {
+        method: "DELETE",
+      });
+    } catch (err) {
+      console.error("Failed to delete item:", err);
+    }
+  };
+
+  const handleAskBrain = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!askQuestion.trim()) return;
+
+    setAskLoading(true);
+    setAskResponse(null);
+    try {
+      const res = await fetch("/api/knowledge/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: askQuestion.trim() }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAskResponse(data.reply);
+      }
+    } catch (err) {
+      console.error("Ask Brain error:", err);
+      setAskResponse("Sorry, failed to query your knowledge vault.");
+    } finally {
+      setAskLoading(false);
+    }
+  };
+
+  // Extract all unique tags
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    items.forEach((item) => {
+      if (Array.isArray(item.tags)) {
+        item.tags.forEach((t) => tagSet.add(t.toLowerCase()));
+      }
     });
-    setGeneratedPlan(plan);
-    setGeneratingPlan(false);
-  };
+    return Array.from(tagSet);
+  }, [items]);
 
-  const markComplete = async (taskId: string) => {
-    try {
-      await fetch("/api/tasks", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: taskId, completed: true }),
-      });
-      await refreshAll();
-    } catch (e) {
-      console.error("Failed to complete task", e);
-    }
-  };
+  // Filtered items
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (selectedType === "favorites" && !item.favorite) return false;
+      if (selectedType === "links" && item.type !== "link") return false;
+      if (selectedType === "notes" && item.type !== "note") return false;
 
-  const snoozeTask = async (taskId: string) => {
-    try {
-      const snoozedUntil = new Date(Date.now() + 86400000).toISOString();
-      await fetch("/api/tasks", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: taskId, snoozedUntil }),
-      });
-      await refreshAll();
-    } catch (e) {
-      console.error("Failed to snooze task", e);
-    }
-  };
+      if (selectedTag) {
+        const tags = (Array.isArray(item.tags) ? item.tags : []) as string[];
+        if (!tags.includes(selectedTag)) return false;
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const titleMatch = item.title.toLowerCase().includes(q);
+        const memoryMatch = (item.aiMemory || "").toLowerCase().includes(q);
+        const summaryMatch = (item.summary || "").toLowerCase().includes(q);
+        const categoryMatch = item.category.toLowerCase().includes(q);
+        return titleMatch || memoryMatch || summaryMatch || categoryMatch;
+      }
+
+      return true;
+    });
+  }, [items, selectedType, selectedTag, searchQuery]);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      {loading ? (
-        <div className="space-y-6">
-          <div className="h-8 w-48 bg-muted rounded animate-pulse" />
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="glass-card p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-muted animate-pulse" />
-                  <div className="space-y-2">
-                    <div className="h-6 w-12 bg-muted rounded animate-pulse" />
-                    <div className="h-3 w-20 bg-muted rounded animate-pulse" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="glass-card p-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-muted animate-pulse" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 w-48 bg-muted rounded animate-pulse" />
-                    <div className="h-3 w-32 bg-muted rounded animate-pulse" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">{t("dashboard", language)}</h1>
-          <p className="text-muted-foreground mt-1" suppressHydrationWarning>
-            {mounted
-              ? new Date().toLocaleDateString("en-US", {
-                  weekday: "long",
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : ""}
-          </p>
-        </div>
-        <Button
-          onClick={handleGenerateDay}
-          disabled={generatingPlan}
-          size="lg"
-          className="w-full sm:w-auto gradient-bg text-white"
-        >
-          {generatingPlan ? (
-            <KineticTextLoader text="Thinking" className="scale-50" />
-          ) : (
-            <>
-              <Sparkles size={18} className="mr-2" />
-              {t("generateMyDay", language)}
-            </>
-          )}
-        </Button>
-      </div>
-
-      {/* AI Generated Plan */}
+    <div className="min-h-screen p-6 md:p-8 space-y-8 bg-background">
+      {/* Toast Notification */}
       <AnimatePresence>
-        {generatedPlan.length > 0 && (
+        {notification && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-emerald-500 text-white shadow-xl font-medium text-sm"
           >
-            <div className="glass-card p-6 border border-primary/20">
-              <h3 className="font-semibold flex items-center gap-2 mb-4">
-                <Sparkles size={18} className="text-primary" />
-                Your AI-Generated Day
-              </h3>
-              <ol className="space-y-2">
-                {generatedPlan.map((item, i) => (
-                  <motion.li
-                    key={i}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                    className="flex items-start gap-3 text-sm"
-                  >
-                    <span className="w-6 h-6 rounded-full gradient-bg flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                      {i + 1}
-                    </span>
-                    <span>{item}</span>
-                  </motion.li>
-                ))}
-              </ol>
-            </div>
+            <CheckCircle2 size={18} />
+            <span>{notification}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: "Today's Tasks", value: todayTasks.length, icon: Clock, color: "text-blue-500" },
-          { label: "Monthly Spend", value: totalExpensesThisMonth, icon: Receipt, color: "text-orange-500", prefix: "₹" },
-          { label: "Active Goals", value: activeGoals.length, icon: Target, color: "text-green-500" },
-          { label: "Pending", value: pendingReminders.length, icon: AlertTriangle, color: "text-red-500" },
-        ].map((stat, i) => (
-          <div key={i} className="glass-card p-4">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-xl bg-muted flex items-center justify-center ${stat.color}`}>
-                <stat.icon size={20} />
-              </div>
-              <div>
-                <p className="text-2xl font-bold flex items-center">
-                  {stat.prefix && <span>{stat.prefix}</span>}
-                  <AnimatedNumber value={stat.value} />
-                </p>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-              </div>
-            </div>
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-3xl bg-gradient-to-r from-purple-900/30 via-indigo-900/20 to-blue-900/30 border border-primary/20 backdrop-blur-xl relative overflow-hidden">
+        <div className="space-y-1 relative z-10">
+          <div className="flex items-center gap-2 text-primary font-semibold text-sm">
+            <Brain size={18} className="animate-pulse" />
+            <span>Notion-Style Knowledge Engine</span>
           </div>
-        ))}
+          <h1 className="text-3xl font-bold tracking-tight">AI Second Brain</h1>
+          <p className="text-muted-foreground text-sm max-w-xl">
+            Paste any web link or note. AI automatically extracts the core memory, generates tags, and indexes it for instant natural search.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 relative z-10">
+          <button
+            onClick={() => setAskOpen(true)}
+            className="flex items-center gap-2 px-5 py-3 rounded-2xl gradient-bg text-white font-semibold text-sm shadow-lg shadow-primary/20 hover:opacity-90 transition-all hover:scale-105"
+          >
+            <Sparkles size={18} />
+            <span>Ask Your Brain AI</span>
+          </button>
+        </div>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Tasks List */}
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Zap size={18} className="text-primary" />
-            {t("whatsDueToday", language)}
-          </h2>
-          <AnimatePresence>
-            {sortedTasks.map((task) => {
-              const urgencyTag = getUrgencyTag(task.dueDate);
-              const Icon = categoryIcons[task.category] || Clock;
-              const days = task.dueDate
-                ? Math.ceil((new Date(task.dueDate).getTime() - Date.now()) / 86400000)
-                : null;
+      {/* Quick Add Bar (Notion Style) */}
+      <form
+        onSubmit={handleSaveItem}
+        className="flex flex-col sm:flex-row items-center gap-3 p-2 rounded-2xl bg-card border border-border/60 shadow-lg"
+      >
+        <div className="flex-1 flex items-center gap-3 px-4 py-2 w-full">
+          <Globe className="text-primary shrink-0" size={20} />
+          <input
+            type="text"
+            value={inputUrlOrNote}
+            onChange={(e) => setInputUrlOrNote(e.target.value)}
+            placeholder="Paste a web link (e.g. https://ui.shadcn.com) or type a note..."
+            className="w-full bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground text-sm font-medium"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={saving || !inputUrlOrNote.trim()}
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-all disabled:opacity-50 shrink-0"
+        >
+          {saving ? (
+            <>
+              <Loader2 className="animate-spin" size={16} />
+              <span>Extracting Memory...</span>
+            </>
+          ) : (
+            <>
+              <Plus size={18} />
+              <span>Save & Extract Memory</span>
+            </>
+          )}
+        </button>
+      </form>
 
-              return (
-                <motion.div
-                  key={task.id}
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, x: -100 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div className={`glass-card p-4 ${task.snoozedUntil ? "opacity-50" : ""}`}>
-                    <div className="flex items-start gap-4">
-                      <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center flex-shrink-0">
-                        <Icon className="text-white" size={18} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h3 className="font-medium">{task.title}</h3>
-                            {task.description && (
-                              <p className="text-sm text-muted-foreground mt-0.5">
-                                {task.description}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {urgencyTag === "overdue" && (
-                              <Badge variant="destructive">{t("overdue", language)}</Badge>
-                            )}
-                            {urgencyTag === "due-soon" && (
-                              <Badge variant="default" className="bg-orange-500">{t("dueSoon", language)}</Badge>
-                            )}
-                            {urgencyTag === "upcoming" && (
-                              <Badge variant="default" className="bg-primary">{t("upcoming", language)}</Badge>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between mt-3">
-                          <div className="text-xs text-muted-foreground">
-                            {days !== null && (
-                              <span>
-                                {days < 0
-                                  ? `${Math.abs(days)} day${Math.abs(days) > 1 ? "s" : ""} overdue`
-                                  : days === 0
-                                  ? "Due today"
-                                  : `Due in ${days} day${days > 1 ? "s" : ""}`}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => markComplete(task.id)}
-                              className="text-green-600 hover:text-green-700"
-                            >
-                              <CheckCircle2 size={16} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => snoozeTask(task.id)}
-                            >
-                              <Pause size={16} />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
+      {/* Search & Filter Controls */}
+      <div className="space-y-4">
+        <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+          {/* Search Input */}
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search website components, notes..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-card border border-border text-sm outline-none focus:border-primary transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Type Filter Tabs */}
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 text-xs font-medium w-full md:w-auto overflow-x-auto">
+            {["all", "links", "notes", "favorites"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSelectedType(tab)}
+                className={`px-4 py-2 rounded-lg capitalize transition-all ${
+                  selectedType === tab
+                    ? "bg-card text-foreground font-semibold shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Goal Progress */}
-          <div className="glass-card p-4">
-            <h3 className="font-semibold flex items-center gap-2 mb-4">
-              <Target size={16} className="text-green-500" />
-              Goal Progress
-            </h3>
-            <div className="space-y-3">
-              {goals.slice(0, 3).map((goal) => {
-                const pct = goal.target ? Math.round((goal.current / goal.target) * 100) : 0;
-                return (
-                  <div key={goal.id}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="truncate">{goal.title}</span>
-                      <span className="font-medium">{pct}%</span>
+        {/* Tag Pills */}
+        {allTags.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <span className="text-muted-foreground flex items-center gap-1 font-medium">
+              <TagIcon size={12} /> Tags:
+            </span>
+            {selectedTag && (
+              <button
+                onClick={() => setSelectedTag(null)}
+                className="px-2.5 py-1 rounded-full bg-primary/20 text-primary border border-primary/30 flex items-center gap-1 font-medium"
+              >
+                Clear filter <X size={12} />
+              </button>
+            )}
+            {allTags.map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                className={`px-2.5 py-1 rounded-full border transition-all ${
+                  selectedTag === tag
+                    ? "bg-primary text-primary-foreground border-primary font-semibold"
+                    : "bg-muted/40 text-muted-foreground border-border hover:bg-muted"
+                }`}
+              >
+                #{tag}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Knowledge Cards Grid */}
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+          <Loader2 className="animate-spin text-primary" size={32} />
+          <p className="text-sm font-medium">Loading your AI Second Brain...</p>
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="text-center py-20 border border-dashed border-border/80 rounded-3xl p-8 bg-card/40">
+          <Bookmark className="mx-auto text-muted-foreground/40 mb-3" size={48} />
+          <h3 className="text-lg font-semibold mb-1">No Knowledge Memories Found</h3>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto mb-4">
+            {searchQuery || selectedTag
+              ? "No items match your search filter. Try clearing filters or searching for something else."
+              : "Paste your first web link (e.g., https://ui.shadcn.com) or type a note above to start building your Second Brain!"}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredItems.map((item) => {
+            const tags = (Array.isArray(item.tags) ? item.tags : []) as string[];
+            return (
+              <motion.div
+                key={item.id}
+                layout
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="group relative flex flex-col justify-between p-5 rounded-3xl bg-card border border-border/70 hover:border-primary/50 transition-all hover:shadow-xl hover:shadow-primary/5"
+              >
+                <div className="space-y-3">
+                  {/* Top Bar: Icon, Category & Actions */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {item.favicon ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={item.favicon}
+                          alt=""
+                          className="w-5 h-5 rounded-md object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = "none";
+                          }}
+                        />
+                      ) : item.type === "link" ? (
+                        <LinkIcon className="text-primary" size={16} />
+                      ) : (
+                        <FileText className="text-purple-400" size={16} />
+                      )}
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-0.5 rounded-md bg-muted/60">
+                        {item.category}
+                      </span>
                     </div>
-                    <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full gradient-bg rounded-full"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.5, delay: 0.2 }}
-                      />
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleToggleFavorite(item.id, item.favorite)}
+                        className={`p-1.5 rounded-lg hover:bg-muted transition-colors ${
+                          item.favorite ? "text-amber-400" : "text-muted-foreground/50 hover:text-amber-400"
+                        }`}
+                      >
+                        <Star size={16} fill={item.favorite ? "currentColor" : "none"} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="p-1.5 rounded-lg text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Insights */}
-          <div className="glass-card p-4">
-            <h3 className="font-semibold flex items-center gap-2 mb-4">
-              <AlertTriangle size={16} className="text-orange-500" />
-              {t("headsUp", language)}
-            </h3>
-            <div className="space-y-3">
-              {insights.slice(0, 3).map((insight) => (
-                <div
-                  key={insight.id}
-                  className="p-3 rounded-xl bg-muted/50 text-sm"
-                >
-                  <p className="font-medium">{insight.title}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{insight.description}</p>
+                  {/* Title */}
+                  <h3 className="font-bold text-base leading-snug line-clamp-2 text-foreground group-hover:text-primary transition-colors">
+                    {item.title}
+                  </h3>
+
+                  {/* AI Memory Badge */}
+                  {item.aiMemory && (
+                    <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20 text-xs text-primary font-medium flex items-start gap-2">
+                      <Sparkles size={14} className="shrink-0 mt-0.5" />
+                      <p className="leading-relaxed">{item.aiMemory}</p>
+                    </div>
+                  )}
+
+                  {/* Summary */}
+                  {item.summary && (
+                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">
+                      {item.summary}
+                    </p>
+                  )}
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Reminders */}
-          <div className="glass-card p-4">
-            <h3 className="font-semibold flex items-center gap-2 mb-4">
-              <Calendar size={16} className="text-blue-500" />
-              Upcoming Reminders
-            </h3>
-            <div className="space-y-2">
-              {reminders.slice(0, 3).map((reminder) => (
-                <div
-                  key={reminder.id}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50"
+                {/* Bottom Bar: Tags & External Link */}
+                <div className="pt-4 mt-4 border-t border-border/40 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-1 flex-wrap overflow-hidden max-h-6">
+                    {tags.slice(0, 3).map((t) => (
+                      <span key={t} className="px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
+                        #{t}
+                      </span>
+                    ))}
+                    {tags.length > 3 && (
+                      <span className="text-muted-foreground font-medium">+{tags.length - 3}</span>
+                    )}
+                  </div>
+
+                  {item.sourceUrl && (
+                    <a
+                      href={item.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 font-semibold text-primary hover:underline shrink-0"
+                    >
+                      <span>Open</span>
+                      <ExternalLink size={12} />
+                    </a>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* "Ask Your Brain" Slide-Over / Drawer Panel */}
+      <AnimatePresence>
+        {askOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setAskOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+            />
+
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed top-0 right-0 h-full w-full max-w-lg bg-card border-l border-border z-50 shadow-2xl flex flex-col p-6 space-y-6"
+            >
+              {/* Drawer Header */}
+              <div className="flex items-center justify-between border-b border-border pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center text-white">
+                    <Brain size={20} />
+                  </div>
+                  <div>
+                    <h2 className="font-bold text-lg">Ask Your AI Brain</h2>
+                    <p className="text-xs text-muted-foreground">Search all saved links & memories</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAskOpen(false)}
+                  className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground"
                 >
-                  <div className="w-2 h-2 rounded-full bg-primary" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{reminder.title}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDate(reminder.datetime)}
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Chat Input */}
+              <form onSubmit={handleAskBrain} className="space-y-3">
+                <div className="relative">
+                  <textarea
+                    value={askQuestion}
+                    onChange={(e) => setAskQuestion(e.target.value)}
+                    placeholder="Ask anything, e.g.: 'Show website components' or 'What React UI tools do I have?'"
+                    rows={3}
+                    className="w-full p-3.5 rounded-2xl bg-background border border-border text-sm outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary resize-none"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={askLoading || !askQuestion.trim()}
+                  className="w-full py-3 rounded-xl gradient-bg text-white font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  {askLoading ? (
+                    <>
+                      <Loader2 className="animate-spin" size={16} />
+                      <span>Searching Memories...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={16} />
+                      <span>Search Second Brain</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Answer Response Area */}
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                {askResponse ? (
+                  <div className="p-4 rounded-2xl bg-muted/40 border border-border/60 text-sm space-y-3">
+                    <div className="flex items-center gap-2 font-semibold text-primary text-xs">
+                      <MessageSquare size={14} />
+                      <span>AI Memory Answer:</span>
+                    </div>
+                    <div className="whitespace-pre-wrap leading-relaxed text-foreground text-xs md:text-sm">
+                      {askResponse}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground space-y-2">
+                    <Brain className="mx-auto text-primary/40" size={40} />
+                    <p className="text-xs max-w-xs mx-auto">
+                      Ask natural language questions across all your saved links, notes, and scraped web resources.
                     </p>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        </div>
-        </>
-      )}
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
