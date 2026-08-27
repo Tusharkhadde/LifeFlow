@@ -21,6 +21,7 @@ model User {
   knowledgeItems  KnowledgeItem[]
   telegramLinks   TelegramLink[]
   linkCodes       LinkCode[]
+  conversations   Conversation[]
   sessions        Session[]
   accounts        Account[]
 }
@@ -80,6 +81,32 @@ model LinkCode {
   expiresAt DateTime
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id             String              @id @default(uuid())
+  userId         String
+  telegramChatId BigInt
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       ConversationMessage[]
+
+  @@unique([userId, telegramChatId])
+  @@index([userId, updatedAt])
+}
+
+model ConversationMessage {
+  id             String       @id @default(uuid())
+  conversationId String
+  role           String
+  content        String       @db.Text
+  telegramMessageId Int?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, telegramMessageId])
+  @@index([conversationId, createdAt])
 }
 
 model KnowledgeItem {
