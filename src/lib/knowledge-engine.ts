@@ -137,13 +137,15 @@ function generateFallbackTags(raw: string, title?: string, desc?: string): strin
   return tags;
 }
 
-export async function queryKnowledgeVault(userId: string, query: string) {
+export async function queryKnowledgeVault(userId: string, query: string, conversationContext = "") {
   const allItems = await prisma.knowledgeItem.findMany({
     where: { userId, archived: false },
     orderBy: { createdAt: "desc" },
   });
 
-  if (allItems.length === 0) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (allItems.length === 0 && !apiKey) {
     return {
       reply: "Your Knowledge Vault is currently empty. Try saving some notes or web links first!",
       matchingItems: [],
@@ -184,8 +186,6 @@ export async function queryKnowledgeVault(userId: string, query: string) {
 
   const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
   const model = process.env.OPENAI_MODEL || "google/gemma-4-26b-a4b-it:free";
-  const apiKey = process.env.OPENAI_API_KEY;
-
   const itemFormattedContext = contextItems
     .map(
       (it, idx) =>
@@ -206,10 +206,13 @@ export async function queryKnowledgeVault(userId: string, query: string) {
   const prompt = `You are LifeFlow AI Second Brain Assistant.
 The user is asking: "${query}"
 
-Here are the user's saved items in their Second Brain:
-${itemFormattedContext}
+Recent conversation history (use it to resolve references such as "that", "it", or "the one I mentioned"):
+${conversationContext || "No previous conversation."}
 
-Formulate a helpful, conversational, human-like response listing the relevant tools/links/notes found in their memory. Always include the item titles and their clickable URLs (e.g. [Title](URL)) if available.`;
+Here are the user's saved items in their Second Brain:
+${itemFormattedContext || "No saved items matched or exist yet."}
+
+Formulate a helpful, conversational, human-like response. Use the conversation history and saved items as context, but never invent facts. Always include the item titles and their clickable URLs (e.g. [Title](URL)) if available.`;
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
