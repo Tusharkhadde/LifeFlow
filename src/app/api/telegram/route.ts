@@ -256,6 +256,7 @@ export async function POST(request: NextRequest) {
       text,
       telegramUserId,
       chatId,
+      telegramMessageId: msg.message_id,
     });
 
     if (routerResult.message) {
