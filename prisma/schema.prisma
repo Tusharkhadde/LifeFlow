@@ -22,6 +22,12 @@ model User {
   telegramLinks   TelegramLink[]
   linkCodes       LinkCode[]
   conversations   Conversation[]
+  personalMemories PersonalMemory[]
+  tasks           Task[]
+  reminders       Reminder[]
+  pendingActions  PendingAction[]
+  contextEntities ContextEntity[]
+  contextRelations ContextRelation[]
   sessions        Session[]
   accounts        Account[]
 }
@@ -68,8 +74,10 @@ model TelegramLink {
   id             String   @id @default(uuid())
   userId         String
   telegramUserId BigInt   @unique
+  telegramChatId BigInt?
   telegramName   String?
   preferredModel String?
+  lastBriefingAt DateTime?
   linkedAt       DateTime @default(now())
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -107,6 +115,98 @@ model ConversationMessage {
 
   @@unique([conversationId, telegramMessageId])
   @@index([conversationId, createdAt])
+}
+
+model PersonalMemory {
+  id         String   @id @default(uuid())
+  userId     String
+  key        String
+  value      String   @db.Text
+  category   String   @default("general")
+  confidence Float    @default(0.8)
+  source     String?
+  archived   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId, archived, updatedAt])
+}
+
+model Task {
+  id          String    @id @default(uuid())
+  userId      String
+  title       String
+  description String?   @db.Text
+  dueAt       DateTime?
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completed, dueAt])
+}
+
+model Reminder {
+  id         String    @id @default(uuid())
+  userId     String
+  text       String
+  remindAt   DateTime
+  completed  Boolean   @default(false)
+  lastNotifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completed, remindAt])
+}
+
+model PendingAction {
+  id             String   @id @default(uuid())
+  userId         String
+  telegramChatId BigInt
+  action         String
+  payload        Json
+  source         String   @db.Text
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, telegramChatId])
+  @@index([expiresAt])
+}
+
+model ContextEntity {
+  id          String            @id @default(uuid())
+  userId      String
+  name        String
+  normalized  String
+  type        String            @default("concept")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outgoing    ContextRelation[] @relation("fromEntity")
+  incoming    ContextRelation[] @relation("toEntity")
+
+  @@unique([userId, normalized])
+  @@index([userId, updatedAt])
+}
+
+model ContextRelation {
+  id           String        @id @default(uuid())
+  userId       String
+  fromEntityId String
+  toEntityId   String
+  relation     String
+  source       String?
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromEntity   ContextEntity @relation("fromEntity", fields: [fromEntityId], references: [id], onDelete: Cascade)
+  toEntity     ContextEntity @relation("toEntity", fields: [toEntityId], references: [id], onDelete: Cascade)
+
+  @@unique([fromEntityId, toEntityId, relation])
+  @@index([userId, createdAt])
 }
 
 model KnowledgeItem {
