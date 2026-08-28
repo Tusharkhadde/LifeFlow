@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAIConfig } from "@/lib/ai-provider";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,23 +20,22 @@ Current context:
 
 Respond in a helpful, action-oriented way. If the user asks what to do today, prioritize by urgency and consequence.`;
 
-    const baseUrl = process.env.OPENAI_BASE_URL;
-    const model = process.env.OPENAI_MODEL;
+    const config = getAIConfig();
 
-    if (!baseUrl || !model || !process.env.OPENAI_API_KEY) {
+    if (!config || !config.baseUrl || !config.model || !config.apiKey) {
       return NextResponse.json({ response: generateFallbackResponse(message) });
     }
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "HTTP-Referer": "https://lifeflow-ai.vercel.app",
         "X-OpenRouter-Title": "LifeFlow AI",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: message },
