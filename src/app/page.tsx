@@ -12,8 +12,6 @@ import {
   FileText,
   Bell,
   LayoutDashboard,
-  Receipt,
-  Target,
   Zap,
   MessageCircle,
   Smartphone,
@@ -45,19 +43,6 @@ const features = [
     border: "ocean" as const,
   },
   {
-    icon: Receipt,
-    title: "Expense Tracking",
-    desc: "Log spending naturally. AI categorizes and surfaces savings automatically.",
-    gradient: "from-amber-500/20 to-amber-500/5",
-    border: "sunset" as const,
-  },
-  {
-    icon: Target,
-    title: "Goal Coach",
-    desc: "Set savings or habit goals. AI tracks progress and keeps you accountable.",
-    gradient: "from-violet-500/20 to-violet-500/5",
-    border: "aurora" as const,
-  },
   {
     icon: Bell,
     title: "Smart Reminders",
@@ -112,7 +97,7 @@ const testimonials = [
     name: "Priya Patel",
     role: "Small Business Owner",
     avatar: "PP",
-    quote: "Expense tracking that actually works. It catches things I'd miss and the predictions keep me on top of bills.",
+    quote: "The Telegram assistant keeps my knowledge organized and helps me act on what matters.",
   },
 ];
 
@@ -350,7 +335,7 @@ export default function HomePage() {
                 <div className="space-y-3 mb-8">
                   {[
                     "Add tasks by texting naturally",
-                    "Track expenses on the go",
+                    "Capture knowledge from Telegram",
                     "Upload documents for instant analysis",
                     "Get smart reminders in real-time",
                     "Switch AI models with /model command",
@@ -405,12 +390,12 @@ export default function HomePage() {
                   </div>
                   <div className="flex-1 flex flex-col justify-end gap-2 py-3">
                     {[
-                      { side: "left", text: "Spent ₹500 on lunch today" },
-                      { side: "right", text: "Done! Saved: ₹500 food expense" },
+                      { side: "left", text: "Remember that I prefer concise answers" },
+                      { side: "right", text: "Got it. I will remember that." },
                       { side: "left", text: "Remind me to pay electricity bill by 5th" },
                       { side: "right", text: "Set reminder for Electricity Bill (Apr 5)" },
-                      { side: "left", text: "[image] receipt.jpg" },
-                      { side: "right", text: "Receipt analyzed: ₹1,200, Grocery" },
+                      { side: "left", text: "What matters today?" },
+                      { side: "right", text: "Here are your tasks and reminders." },
                     ].map((msg, i) => (
                       <motion.div
                         key={i}
@@ -527,13 +512,13 @@ export default function HomePage() {
                 <span className="font-semibold text-sm text-white">LifeFlow</span>
               </div>
               <p className="text-xs text-zinc-600 leading-relaxed max-w-xs">
-                Your personal AI-powered life operating system. Tasks, expenses, documents, and reminders — all in one place.
+                Your private AI context engine for knowledge, documents, tasks, and reminders.
               </p>
             </div>
             <div>
               <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">Product</h4>
               <ul className="space-y-2.5">
-                {["Dashboard", "Expenses", "Goals", "Reminders", "Insights"].map((item) => (
+                {["Dashboard", "Reminders", "Insights"].map((item) => (
                   <li key={item}>
                     <Link href={`/${item.toLowerCase()}`} className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">
                       {item}
