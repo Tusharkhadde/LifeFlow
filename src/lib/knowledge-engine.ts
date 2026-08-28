@@ -1,5 +1,9 @@
 import { scrapeWebPage } from "@/lib/web-scraper";
 import { prisma } from "@/lib/db";
+import { getPersonalMemoryContext } from "@/lib/personal-memory";
+import { getAIConfig } from "@/lib/ai-provider";
+import { getContextGraph, getRecentContextGraph } from "@/lib/context-graph";
+import { getProductivityContext } from "@/lib/productivity-actions";
 
 export interface ProcessedKnowledge {
   title: string;
@@ -39,11 +43,9 @@ export async function processAndSynthesizeInput(
     pageDesc = scraped.description;
   }
 
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = process.env.OPENAI_MODEL || "google/gemma-4-26b-a4b-it:free";
-  const apiKey = process.env.OPENAI_API_KEY;
+  const config = getAIConfig();
 
-  if (!apiKey) {
+  if (!config) {
     // Fallback if no LLM key
     const inferredTags = generateFallbackTags(rawInput, pageTitle, pageDesc);
     const memory = pageDesc || (pageTitle ? `${pageTitle} - saved link` : rawInput.slice(0, 100));
@@ -74,16 +76,16 @@ ${isWebUrl ? `Title: ${pageTitle}\nDescription: ${pageDesc}\nURL: ${sourceUrl}\n
 `;
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "HTTP-Referer": "https://lifeflow-ai.vercel.app",
         "X-OpenRouter-Title": "LifeFlow Knowledge Engine",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.1,
       }),
@@ -138,12 +140,12 @@ function generateFallbackTags(raw: string, title?: string, desc?: string): strin
 }
 
 export async function queryKnowledgeVault(userId: string, query: string, conversationContext = "") {
-  const allItems = await prisma.knowledgeItem.findMany({
+  const [allItems, personalMemoryContext, graphContext, recentGraphContext, productivityContext] = await Promise.all([prisma.knowledgeItem.findMany({
     where: { userId, archived: false },
     orderBy: { createdAt: "desc" },
-  });
+  }), getPersonalMemoryContext(userId), getContextGraph(userId, query), getRecentContextGraph(userId), getProductivityContext(userId)]);
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = getAIConfig()?.apiKey;
 
   if (allItems.length === 0 && !apiKey) {
     return {
@@ -184,8 +186,7 @@ export async function queryKnowledgeVault(userId: string, query: string, convers
   // If no match found by score, return latest items for LLM context
   const contextItems = matching.length > 0 ? matching.slice(0, 5) : allItems.slice(0, 5);
 
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = process.env.OPENAI_MODEL || "google/gemma-4-26b-a4b-it:free";
+  const config = getAIConfig();
   const itemFormattedContext = contextItems
     .map(
       (it, idx) =>
@@ -193,7 +194,7 @@ export async function queryKnowledgeVault(userId: string, query: string, convers
     )
     .join("\n\n");
 
-  if (!apiKey) {
+  if (!config) {
     const listResponse = contextItems
       .map((it) => `• [${it.title}](${it.sourceUrl || "#"}) — ${it.aiMemory || it.summary}`)
       .join("\n");
@@ -209,22 +210,31 @@ The user is asking: "${query}"
 Recent conversation history (use it to resolve references such as "that", "it", or "the one I mentioned"):
 ${conversationContext || "No previous conversation."}
 
+Personal memories (use only when relevant):
+${personalMemoryContext || "No personal memories stored."}
+
+Known relationships from the user's context graph:
+${[...new Set([...graphContext, ...recentGraphContext])].slice(0, 30).join("\n") || "No context graph relationships found."}
+
+Current life state:
+${productivityContext}
+
 Here are the user's saved items in their Second Brain:
 ${itemFormattedContext || "No saved items matched or exist yet."}
 
-Formulate a helpful, conversational, human-like response. Use the conversation history and saved items as context, but never invent facts. Always include the item titles and their clickable URLs (e.g. [Title](URL)) if available.`;
+Formulate a helpful, conversational, human-like response using all relevant context above. For questions about today, priorities, or what matters, use the current life state first. Resolve references using conversation history and relationships. Never invent facts. Always include saved item titles and clickable URLs (e.g. [Title](URL)) when relevant.`;
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "HTTP-Referer": "https://lifeflow-ai.vercel.app",
         "X-OpenRouter-Title": "LifeFlow Knowledge Assistant",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
       }),
