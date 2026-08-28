@@ -5,8 +5,8 @@ import { getAuthenticatedUserId } from "@/lib/auth-helpers";
 export async function GET(request: NextRequest) {
   try {
     const userId = await getAuthenticatedUserId(request.headers);
-    const items = await prisma.knowledgeItem.findMany({
-      where: { userId, archived: false },
+    const items = await prisma.reminder.findMany({
+      where: { userId },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json({ reminders: items });
