@@ -10,12 +10,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
-    const systemPrompt = `You are LifeFlow AI, a personal life operating system assistant. You help users manage their tasks, expenses, goals, reminders, and documents. Be helpful, concise, and proactive in your suggestions.
+    const systemPrompt = `You are LifeFlow AI, a personal knowledge and productivity assistant. You help users manage tasks, reminders, and documents. Be helpful, concise, and proactive in your suggestions.
 
 Current context:
 - Tasks: ${context?.tasks || 0} pending
-- Expenses: ₹${context?.totalExpenses || 0} this month
-- Goals: ${context?.goals || 0} active
 - Reminders: ${context?.reminders || 0} pending
 
 Respond in a helpful, action-oriented way. If the user asks what to do today, prioritize by urgency and consequence.`;
@@ -68,11 +66,5 @@ function generateFallbackResponse(message: string): string {
   if (lower.includes("today") || lower.includes("do")) {
     return "Based on your priorities, I recommend focusing on your most urgent tasks first. Check your dashboard for the full prioritized list.";
   }
-  if (lower.includes("bill") || lower.includes("pay")) {
-    return "Check your dashboard for upcoming bills. I recommend setting up auto-reminders 2 days before each due date.";
-  }
-  if (lower.includes("expense") || lower.includes("spend")) {
-    return "Review your expense tracker for category breakdowns and savings recommendations. Look for anomalies in recurring charges.";
-  }
-  return "I'm here to help you manage your life admin. Try asking about your tasks, bills, expenses, or goals!";
+  return "I'm here to help you manage your tasks, reminders, documents, and knowledge vault.";
 }
