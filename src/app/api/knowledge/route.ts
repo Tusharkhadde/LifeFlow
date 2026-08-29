@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthenticatedUserId } from "@/lib/auth-helpers";
 import { processAndSynthesizeInput } from "@/lib/knowledge-engine";
+import { ingestContext } from "@/lib/context-graph";
 
 export async function GET(request: NextRequest) {
   try {
@@ -76,6 +77,7 @@ export async function POST(request: NextRequest) {
         content: processed.content || null,
       },
     });
+    await ingestContext(userId, `${item.title}. ${item.aiMemory || item.summary || ""}`, item.sourceUrl || input.trim());
 
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
