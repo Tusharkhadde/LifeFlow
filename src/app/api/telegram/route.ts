@@ -3,7 +3,18 @@ import { prisma } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
 import telegramAI from "@/lib/telegram-ai";
 import { agentRouter } from "@/lib/agent-router";
-const { analyzeDocumentImage } = telegramAI;
+import { processAndSynthesizeInput } from "@/lib/knowledge-engine";
+import { forgetPersonalMemory, listPersonalMemories } from "@/lib/personal-memory";
+import { createReminder, createTask, formatUserDate, getDailyBriefing, validateTimezone } from "@/lib/productivity-actions";
+import { ingestContext, listContextGraph } from "@/lib/context-graph";
+import { resolvePendingAction } from "@/lib/inbox-triage";
+const { analyzeDocumentImage, transcribeAudio } = telegramAI;
+
+function hasValidWebhookSecret(request: NextRequest): boolean {
+  const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!expected) return process.env.NODE_ENV !== "production";
+  return request.headers.get("x-telegram-bot-api-secret-token") === expected;
+}
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -23,6 +34,14 @@ interface TelegramDocument {
   file_size?: number;
 }
 
+interface TelegramVoice {
+  file_id: string;
+  file_unique_id: string;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
 interface TelegramMessage {
   message_id: number;
   from: {
@@ -37,6 +56,8 @@ interface TelegramMessage {
   caption?: string;
   photo?: TelegramPhoto[];
   document?: TelegramDocument;
+  voice?: TelegramVoice;
+  audio?: TelegramVoice;
 }
 
 async function handleLinkCode(
@@ -68,6 +89,7 @@ async function handleLinkCode(
     data: {
       userId: linkCode.userId,
       telegramUserId: BigInt(telegramUserId),
+      telegramChatId: BigInt(chatId),
       telegramName: firstName,
     },
   });
@@ -106,15 +128,42 @@ async function downloadTelegramFile(fileId: string): Promise<{ buffer: Buffer; m
 
 export async function POST(request: NextRequest) {
   try {
+    if (!hasValidWebhookSecret(request)) {
+      return NextResponse.json({ ok: false }, { status: 401 });
+    }
     const body = await request.json();
     const msg: TelegramMessage | undefined = body.message;
 
-    if (!msg) {
+    if (!msg || !msg.from?.id || !msg.chat?.id || typeof msg.message_id !== "number") {
       return NextResponse.json({ ok: true });
     }
 
-    const fileId = msg.photo?.[msg.photo.length - 1]?.file_id || msg.document?.file_id;
+    const fileId = msg.photo?.[msg.photo.length - 1]?.file_id || msg.document?.file_id || msg.voice?.file_id || msg.audio?.file_id;
     const isImage = msg.photo || (msg.document?.mime_type || "").startsWith("image/");
+    const isVoice = Boolean(msg.voice || msg.audio);
+    const isPdf = msg.document?.mime_type === "application/pdf" || msg.document?.file_name?.toLowerCase().endsWith(".pdf");
+
+    if (fileId && isVoice) {
+      const telegramUserId = msg.from.id;
+      const chatId = msg.chat.id;
+      const telegramLink = await prisma.telegramLink.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
+      if (!telegramLink) {
+        await sendTelegramMessage(chatId, "You're not linked yet! Send /link <code> to connect your LifeFlow account.");
+        return NextResponse.json({ ok: true });
+      }
+      await prisma.telegramLink.update({ where: { id: telegramLink.id }, data: { telegramChatId: BigInt(chatId) } });
+      await sendTelegramMessage(chatId, "🎙️ Transcribing your voice message...");
+      const file = await downloadTelegramFile(fileId);
+      const transcript = file ? await transcribeAudio(file.buffer, msg.audio ? "audio.mp3" : "voice.ogg") : null;
+      if (!transcript) {
+        await sendTelegramMessage(chatId, "I couldn't transcribe that voice message. Check your AI transcription model settings and try again.");
+        return NextResponse.json({ ok: true });
+      }
+      const result = await agentRouter.route({ text: transcript, telegramUserId, chatId, telegramMessageId: msg.message_id });
+      await sendTelegramMessage(chatId, `🎙️ *Transcript:* ${transcript}`);
+      if (result.message) await sendTelegramMessage(chatId, result.message);
+      return NextResponse.json({ ok: true });
+    }
 
     if (fileId && isImage) {
       const telegramUserId = msg.from.id;
@@ -128,6 +177,8 @@ export async function POST(request: NextRequest) {
         await sendTelegramMessage(chatId, "You're not linked yet! Send /link <code> to connect your LifeFlow account.");
         return NextResponse.json({ ok: true });
       }
+
+      await prisma.telegramLink.update({ where: { id: telegramLink.id }, data: { telegramChatId: BigInt(chatId) } });
 
       await sendTelegramMessage(chatId, "📄 Analyzing document... please wait.");
 
@@ -145,7 +196,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      await prisma.knowledgeItem.create({
+      const item = await prisma.knowledgeItem.create({
         data: {
           userId,
           title: result.name,
@@ -156,8 +207,43 @@ export async function POST(request: NextRequest) {
           tags: ["document", result.type],
         },
       });
+      await ingestContext(userId, `${item.title}. ${item.aiMemory || item.summary || ""}`, caption || "telegram-image-document");
 
       await sendTelegramMessage(chatId, `📄 Saved *${result.name}* to your AI Second Brain Vault!`);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (fileId && isPdf) {
+      const telegramUserId = msg.from.id;
+      const chatId = msg.chat.id;
+      const telegramLink = await prisma.telegramLink.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
+      if (!telegramLink) {
+        await sendTelegramMessage(chatId, "You're not linked yet! Send /link <code> to connect your LifeFlow account.");
+        return NextResponse.json({ ok: true });
+      }
+      await prisma.telegramLink.update({ where: { id: telegramLink.id }, data: { telegramChatId: BigInt(chatId) } });
+      await sendTelegramMessage(chatId, "📄 Reading your PDF...");
+      const file = await downloadTelegramFile(fileId);
+      const extractedText = file ? extractPdfText(file.buffer) : "";
+      if (!extractedText) {
+        await sendTelegramMessage(chatId, "I couldn't read text from that PDF. Try sending a searchable PDF or an image of the page.");
+        return NextResponse.json({ ok: true });
+      }
+      const processed = await processAndSynthesizeInput(extractedText.slice(0, 12000), "document");
+      const item = await prisma.knowledgeItem.create({
+        data: {
+          userId: telegramLink.userId,
+          title: msg.document?.file_name || processed.title,
+          summary: processed.summary,
+          aiMemory: processed.aiMemory,
+          type: "document",
+          category: processed.category,
+          tags: ["pdf", ...processed.tags],
+          content: extractedText.slice(0, 50000),
+        },
+      });
+      await ingestContext(telegramLink.userId, `${item.title}. ${item.aiMemory || item.summary || ""}`, msg.document?.file_name || "telegram-pdf");
+      await sendTelegramMessage(chatId, `📄 Saved and indexed *${item.title}*. You can ask me about its contents anytime.`);
       return NextResponse.json({ ok: true });
     }
 
@@ -178,7 +264,7 @@ export async function POST(request: NextRequest) {
 
       await sendTelegramMessage(
         chatId,
-        `*LifeFlow AI Second Brain Bot*\n\nSend any web link or note — I will automatically summarize it, extract key tags, and save it to your Knowledge Vault.\n\nAsk me anything — *"website components"*, *"show React UI tools"*!\n\n*Commands:*\n/link <code> — Link account\n/summary — View vault stats\n/unlink — Disconnect account`
+        `*LifeFlow AI Second Brain Bot*\n\nSend any web link, voice message, searchable PDF, or note. I will summarize it, extract key facts, and connect it to your Knowledge Vault.\n\nAsk me anything — *"website components"*, *"show React UI tools"*, or *"what matters today?"*\n\n*Commands:*\n/link <code> — Link account\n/memory — Show remembered facts\n/forget <text> — Forget a fact\n/task <text> — Create a task\n/remind <text> at <time> — Set a reminder\n/timezone <Area/City> — Set your timezone\n/confirm or /cancel — Approve or reject an AI action\n/briefing — Daily overview\n/context — Show connected knowledge\n/clearconversation — Delete chat history\n/summary — View vault stats\n/unlink — Disconnect account`
       );
       return NextResponse.json({ ok: true });
     }
@@ -195,10 +281,21 @@ export async function POST(request: NextRequest) {
 *Save Web Links & Notes:*
 • Send \`https://ui.shadcn.com\` — Auto-scrapes & extracts memory!
 • Send notes or ideas.
+• Send voice messages or searchable PDFs for transcription and indexing.
 
 *Ask Knowledge Queries:*
 • _"website components"_
-• _"show React UI tools"_`
+• _"show React UI tools"_
+
+*Productivity:*
+• _"Remind me to call Alex tomorrow"_
+• _"Add task: finish the report"_
+• _"I prefer concise answers"_
+• Reply /confirm when LifeFlow proposes an action
+
+*Context graph:*
+• _"Project Atlas is for my portfolio"_
+• /context — Show connected knowledge_`
       );
       return NextResponse.json({ ok: true });
     }
@@ -251,6 +348,78 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    await prisma.telegramLink.update({ where: { id: telegramLink.id }, data: { telegramChatId: BigInt(chatId) } });
+
+    if (text.startsWith("/timezone")) {
+      const timezone = text.slice("/timezone".length).trim();
+      if (!timezone || !validateTimezone(timezone)) {
+        await sendTelegramMessage(chatId, "Usage: /timezone Area/City\nExample: /timezone Asia/Kolkata");
+        return NextResponse.json({ ok: true });
+      }
+      await prisma.user.update({ where: { id: telegramLink.userId }, data: { timezone } });
+      await sendTelegramMessage(chatId, `✅ Timezone set to ${timezone}. Future reminders will use this timezone.`);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text === "/confirm" || text === "/cancel") {
+      const result = await resolvePendingAction(telegramLink.userId, chatId, text === "/confirm");
+      await sendTelegramMessage(chatId, result.message);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text === "/memory") {
+      const memories = await listPersonalMemories(telegramLink.userId);
+      await sendTelegramMessage(chatId, memories.length
+        ? `*What I remember about you:*\n${memories.map((memory) => `• *${memory.key}:* ${memory.value}`).join("\n")}`
+        : "I don't have any personal memories about you yet.");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.startsWith("/forget ")) {
+      const removed = await forgetPersonalMemory(telegramLink.userId, text.slice(8).trim());
+      await sendTelegramMessage(chatId, removed ? `Forgot ${removed} personal memor${removed === 1 ? "y" : "ies"}.` : "I couldn't find that memory.");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text === "/clearconversation") {
+      const conversation = await prisma.conversation.findUnique({ where: { userId_telegramChatId: { userId: telegramLink.userId, telegramChatId: BigInt(chatId) } } });
+      if (conversation) await prisma.conversationMessage.deleteMany({ where: { conversationId: conversation.id } });
+      await sendTelegramMessage(chatId, "Conversation history cleared. Your saved knowledge and personal memories are unchanged.");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text === "/briefing") {
+      await sendTelegramMessage(chatId, await getDailyBriefing(telegramLink.userId));
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text === "/context") {
+      const relationships = await listContextGraph(telegramLink.userId);
+      await sendTelegramMessage(chatId, relationships.length
+        ? `*Your context graph:*\n${relationships.map((edge) => `• ${edge.fromEntity.name} ${edge.relation.replace("_", " ")} ${edge.toEntity.name}`).join("\n")}`
+        : "Your context graph is empty. Save notes or describe relationships like: `Project Atlas is for my portfolio`.");
+      return NextResponse.json({ ok: true });
+    }
+
+    const taskMatch = text.match(/^\/task\s+(.+?)(?:\s+due\s+(.+))?$/i);
+    if (taskMatch) {
+      const task = await createTask(telegramLink.userId, taskMatch[1], taskMatch[2]);
+      await sendTelegramMessage(chatId, `✅ Task created: *${task.title}*`);
+      return NextResponse.json({ ok: true });
+    }
+
+    const reminderMatch = text.match(/^\/remind\s+(.+?)\s+(?:at|in)\s+(.+)$/i);
+    if (reminderMatch) {
+      try {
+        const reminder = await createReminder(telegramLink.userId, reminderMatch[1], reminderMatch[2]);
+        await sendTelegramMessage(chatId, `✅ Reminder set for ${await formatUserDate(telegramLink.userId, reminder.remindAt)}: *${reminder.text}*`);
+      } catch (error) {
+        await sendTelegramMessage(chatId, error instanceof Error ? error.message : "I couldn't create that reminder.");
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+
     // Delegate message routing to Agent Router (auto web link scraping & RAG knowledge search)
     const routerResult = await agentRouter.route({
       text,
@@ -268,6 +437,14 @@ export async function POST(request: NextRequest) {
     console.error("Telegram webhook error:", error);
     return NextResponse.json({ ok: true });
   }
+}
+
+function extractPdfText(buffer: Buffer): string {
+  const raw = buffer.toString("latin1");
+  const textBlocks = [...raw.matchAll(/\(([^()]{2,500})\)/g)]
+    .map((match) => match[1].replace(/\\([()\\])/g, "$1").replace(/\\[nrt]/g, " "))
+    .filter((text) => /[a-zA-Z]{2}/.test(text));
+  return textBlocks.join(" ").replace(/\s+/g, " ").trim();
 }
 
 export async function GET() {
