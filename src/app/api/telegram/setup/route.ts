@@ -1,15 +1,27 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
 export async function POST(request: Request) {
   try {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!process.env.TELEGRAM_WEBHOOK_SECRET) {
+      return NextResponse.json({ error: "TELEGRAM_WEBHOOK_SECRET is required" }, { status: 500 });
+    }
     const body = await request.json();
     const { webhookUrl } = body;
 
-    if (!webhookUrl) {
+    let parsedWebhookUrl: URL;
+    try {
+      parsedWebhookUrl = new URL(webhookUrl);
+    } catch {
+      return NextResponse.json({ error: "webhookUrl must be a valid HTTPS URL" }, { status: 400 });
+    }
+    if (parsedWebhookUrl.protocol !== "https:") {
       return NextResponse.json(
-        { error: "webhookUrl is required" },
+        { error: "webhookUrl must be a valid HTTPS URL" },
         { status: 400 }
       );
     }
@@ -20,6 +32,7 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: `${webhookUrl}/api/telegram`,
+        secret_token: process.env.TELEGRAM_WEBHOOK_SECRET,
         allowed_updates: ["message"],
       }),
     });
