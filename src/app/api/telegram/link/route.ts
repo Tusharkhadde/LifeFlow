@@ -68,7 +68,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       linked: links.length > 0,
       accounts: links.map((l) => ({
-        telegramId: l.telegramUserId,
+        telegramId: l.telegramUserId.toString(),
         name: l.telegramName,
         linkedAt: l.linkedAt,
       })),
