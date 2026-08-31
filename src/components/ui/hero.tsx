@@ -48,7 +48,7 @@ export const PremiumHero = () => {
   const LAYERS = 3;
   const BEAMS_PER_LAYER = 8;
 
-  const aiTitles = ["tasks", "expenses", "documents", "goals", "reminders"];
+  const aiTitles = ["tasks", "documents", "reminders", "knowledge", "memories"];
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -195,7 +195,7 @@ export const PremiumHero = () => {
           </h1>
 
           <p className="text-base md:text-lg leading-relaxed text-zinc-400 max-w-xl text-center">
-            LifeFlow AI organizes your tasks, tracks expenses, analyzes documents, and reminds you what matters &mdash; all in one place.
+            LifeFlow AI organizes your tasks, analyzes documents, remembers what matters, and keeps your day on track.
           </p>
 
           <div className="flex flex-row gap-3 flex-wrap justify-center">
