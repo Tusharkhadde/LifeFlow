@@ -3,6 +3,8 @@
  * Manages token budget, automatic chat session rollover, and history restoration.
  */
 
+import { getAIConfig } from "@/lib/ai-provider";
+
 export interface ChatMessageItem {
   role: "system" | "user" | "assistant";
   content: string;
@@ -49,9 +51,7 @@ export async function summarizeHistoryForRestoration(
   olderMessages: ChatMessageItem[],
   existingSummary: string | null = null
 ): Promise<string> {
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = process.env.OPENAI_MODEL || "google/gemma-4-26b-a4b-it:free";
-  const apiKey = process.env.OPENAI_API_KEY;
+  const config = getAIConfig();
 
   const conversationText = olderMessages
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
@@ -65,21 +65,21 @@ ${existingSummary || "None"}
 Previous Conversation Transcript:
 ${conversationText}`;
 
-  if (!apiKey) {
+  if (!config) {
     return `Prior session summary: User engaged in chat. Recent topics: ${olderMessages.slice(-4).map(m => m.content.slice(0, 50)).join("; ")}`;
   }
 
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+    const res = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "HTTP-Referer": "https://lifeflow-ai.vercel.app",
         "X-OpenRouter-Title": "LifeFlow AI Second Brain",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [{ role: "user", content: prompt }],
         max_tokens: 300,
         temperature: 0.2,
