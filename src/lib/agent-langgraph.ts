@@ -21,6 +21,7 @@ const AgentStateAnnotation = Annotation.Root({
 });
 
 export type AgentStateType = typeof AgentStateAnnotation.State;
+import { getAIConfig } from "@/lib/ai-provider";
 
 const conversationHistoryStore = new Map<number, BaseMessage[]>();
 const conversationSummaryStore = new Map<number, string>();
@@ -47,11 +48,9 @@ async function callLLMWithTools(
   systemPrompt: string,
   existingSummary: string | null = null
 ) {
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1";
-  const model = process.env.OPENAI_MODEL || "google/gemma-4-26b-a4b-it:free";
-  const apiKey = process.env.OPENAI_API_KEY;
+  const config = getAIConfig();
 
-  if (!apiKey) {
+  if (!config) {
     throw new Error("OPENAI_API_KEY is not set in environment");
   }
 
@@ -75,16 +74,16 @@ async function callLLMWithTools(
     existingSummary
   );
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
+  const res = await fetch(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       "HTTP-Referer": "https://lifeflow-ai.vercel.app",
       "X-OpenRouter-Title": "LifeFlow AI Second Brain",
     },
     body: JSON.stringify({
-      model,
+      model: config.model,
       messages: formattedMessages,
       tools: ALL_TOOLS_DEFINITIONS,
       tool_choice: "auto",
