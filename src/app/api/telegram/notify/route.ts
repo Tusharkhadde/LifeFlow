@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { getDailyBriefing } from "@/lib/productivity-actions";
+import { getEnhancedDailyBriefing } from "@/lib/proactive-intelligence";
 
 async function notify(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -31,7 +31,7 @@ async function notify(request: NextRequest) {
     const lastBriefingAt = link?.lastBriefingAt;
     const shouldSendBriefing = !lastBriefingAt || lastBriefingAt.toDateString() !== now.toDateString();
     if (shouldSendBriefing && link) {
-      await sendTelegramMessage(chatId, await getDailyBriefing(userId));
+      await sendTelegramMessage(chatId, await getEnhancedDailyBriefing(userId));
       await prisma.telegramLink.update({ where: { id: link.id }, data: { lastBriefingAt: now } });
     }
   }
