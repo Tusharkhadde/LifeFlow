@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthenticatedUserId } from "@/lib/auth-helpers";
-import { processAndSynthesizeInput } from "@/lib/knowledge-engine";
+import { processAndSynthesizeInput, indexKnowledgeItemEmbedding } from "@/lib/knowledge-engine";
 import { ingestContext } from "@/lib/context-graph";
+import { publishAppEvent } from "@/lib/events";
 
 export async function GET(request: NextRequest) {
   try {
@@ -77,7 +78,9 @@ export async function POST(request: NextRequest) {
         content: processed.content || null,
       },
     });
+    await indexKnowledgeItemEmbedding(item.id);
     await ingestContext(userId, `${item.title}. ${item.aiMemory || item.summary || ""}`, item.sourceUrl || input.trim());
+    await publishAppEvent(userId, "knowledge_saved", { id: item.id, title: item.title });
 
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
