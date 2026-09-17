@@ -43,7 +43,6 @@ const features = [
     border: "ocean" as const,
   },
   {
-  {
     icon: Bell,
     title: "Smart Reminders",
     desc: "Natural language scheduling. Pay bills before they're due, effortlessly.",
