@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export async function markIntegrationHealthy(
@@ -14,14 +15,14 @@ export async function markIntegrationHealthy(
       status: "healthy",
       lastSuccessAt: new Date(),
       latencyMs,
-      metadata,
+      metadata: metadata as Prisma.InputJsonValue | undefined,
     },
     update: {
       status: "healthy",
       lastSuccessAt: new Date(),
       lastError: null,
       latencyMs,
-      metadata,
+      metadata: metadata as Prisma.InputJsonValue | undefined,
     },
   });
 }

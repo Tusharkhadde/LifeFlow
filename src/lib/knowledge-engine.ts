@@ -1,6 +1,5 @@
 import { scrapeWebPage } from "@/lib/web-scraper";
 import { getAIConfig } from "@/lib/ai-provider";
-import { indexKnowledgeItemEmbedding } from "@/lib/hybrid-search";
 import { executeSmartSearch } from "@/lib/search-pipeline";
 
 export { indexKnowledgeItemEmbedding } from "@/lib/hybrid-search";

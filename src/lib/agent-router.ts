@@ -7,7 +7,7 @@ import { prisma } from "@/lib/db";
 import { isURL, processAndSynthesizeInput, indexKnowledgeItemEmbedding } from "@/lib/knowledge-engine";
 import { publishAppEvent } from "@/lib/events";
 import { extractPersonalFact, rememberPersonalFact } from "@/lib/personal-memory";
-import { createReminder, createTask, formatUserDate } from "@/lib/productivity-actions";
+import { createTask } from "@/lib/productivity-actions";
 import { autoLinkGraph, ingestContext } from "@/lib/context-graph";
 import { proposeReminder, triageInbox } from "@/lib/inbox-triage";
 import { createExpenseFromText, createExpenseFromParsed } from "@/lib/expense-actions";

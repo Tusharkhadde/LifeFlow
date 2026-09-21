@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type { IntegrationProvider } from "@/lib/integrations/oauth-state";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
@@ -34,7 +35,7 @@ export async function upsertIntegration(
       refreshToken: encryptSecret(data.refreshToken),
       expiresAt: data.expiresAt,
       scope: data.scope,
-      metadata: data.metadata,
+      metadata: data.metadata as Prisma.InputJsonValue | undefined,
     },
     update: {
       accessToken: encryptSecret(data.accessToken) || "",
@@ -44,7 +45,7 @@ export async function upsertIntegration(
           : encryptSecret(data.refreshToken),
       expiresAt: data.expiresAt,
       scope: data.scope,
-      metadata: data.metadata,
+      metadata: data.metadata as Prisma.InputJsonValue | undefined,
       syncEnabled: true,
     },
   });

@@ -42,7 +42,7 @@ export default function SearchHistoryPage() {
               <div className="flex items-center gap-2 mb-2">
                 <Search size={16} className="text-primary" />
                 <span className="font-semibold">{entry.query}</span>
-                {entry.exaUsed && <Globe size={14} className="text-blue-400" title="Exa search used" />}
+                {entry.exaUsed && <span title="Exa search used"><Globe size={14} className="text-blue-400" /></span>}
                 <span className="text-xs text-muted-foreground ml-auto">{new Date(entry.createdAt).toLocaleString()}</span>
               </div>
               {entry.answer && <p className="text-sm text-muted-foreground line-clamp-3">{entry.answer}</p>}

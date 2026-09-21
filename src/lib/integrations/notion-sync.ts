@@ -1,5 +1,5 @@
 import { getAppBaseUrl } from "@/lib/integrations/oauth-state";
-import { getIntegration, upsertIntegration, markSynced } from "@/lib/integrations/store";
+import { getIntegration, markSynced } from "@/lib/integrations/store";
 import { prisma } from "@/lib/db";
 import { indexKnowledgeItemEmbedding } from "@/lib/hybrid-search";
 import { ingestContext } from "@/lib/context-graph";

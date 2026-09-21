@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getAIConfig } from "@/lib/ai-provider";
 import { searchExa, formatExaResultsForPrompt, isExaConfigured, ExaSearchResult } from "@/lib/exa-search";
@@ -279,7 +280,14 @@ export async function saveKnowledgeWithEmbedding(
     metadata?: unknown;
   }
 ) {
-  const item = await prisma.knowledgeItem.create({ data: { userId, ...data } });
+  const item = await prisma.knowledgeItem.create({
+    data: {
+      userId,
+      ...data,
+      tags: data.tags as Prisma.InputJsonValue | undefined,
+      metadata: data.metadata as Prisma.InputJsonValue | undefined,
+    },
+  });
   await indexKnowledgeItemEmbedding(item.id);
   await publishAppEvent(userId, "knowledge_saved", { id: item.id, title: item.title, type: item.type });
   return item;

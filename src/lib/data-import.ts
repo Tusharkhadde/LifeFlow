@@ -9,7 +9,7 @@ interface ImportPayload {
 }
 
 export async function importLifeFlowData(userId: string, payload: ImportPayload) {
-  let imported = { knowledge: 0, tasks: 0, reminders: 0, expenses: 0 };
+  const imported = { knowledge: 0, tasks: 0, reminders: 0, expenses: 0 };
 
   for (const item of payload.knowledge || []) {
     if (!item.title?.trim()) continue;

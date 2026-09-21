@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
 import { enqueueJob } from "@/lib/job-queue";
@@ -83,7 +84,7 @@ export async function publishAppEvent(
 ) {
   try {
     const event = await prisma.appEvent.create({
-      data: { userId, type, payload },
+      data: { userId, type, payload: payload as Prisma.InputJsonValue },
     });
     const notify = NOTIFY_EVENTS[type];
     if (notify) {
