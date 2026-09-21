@@ -4,11 +4,18 @@
  */
 
 import { prisma } from "@/lib/db";
-import { isURL, processAndSynthesizeInput, queryKnowledgeVault } from "@/lib/knowledge-engine";
+import { isURL, processAndSynthesizeInput, indexKnowledgeItemEmbedding } from "@/lib/knowledge-engine";
+import { publishAppEvent } from "@/lib/events";
 import { extractPersonalFact, rememberPersonalFact } from "@/lib/personal-memory";
 import { createReminder, createTask, formatUserDate } from "@/lib/productivity-actions";
-import { ingestContext } from "@/lib/context-graph";
+import { autoLinkGraph, ingestContext } from "@/lib/context-graph";
 import { proposeReminder, triageInbox } from "@/lib/inbox-triage";
+import { createExpenseFromText, createExpenseFromParsed } from "@/lib/expense-actions";
+import { createHabit, logHabit, parseHabitCommand } from "@/lib/habit-actions";
+import { findDuplicateKnowledge } from "@/lib/duplicate-detection";
+import { executeSmartSearch } from "@/lib/search-pipeline";
+import { parseBankSms } from "@/lib/sms-parser";
+import { runMorningAgent } from "@/lib/morning-agent";
 
 export interface Message {
   text: string;
@@ -116,6 +123,12 @@ class AgentRouter {
         return reply;
       };
 
+      const morningMatch = text.match(/^(?:run my morning|start my day|morning os|plan my day)$/i);
+      if (morningMatch) {
+        const run = await runMorningAgent(userId, { notifyTelegram: false });
+        return { success: true, message: await saveReply(run.telegram) };
+      }
+
       const reminderMatch = text.match(/^remind me to (.+?)\s+(?:at|in)\s+(.+)$/i);
       if (reminderMatch) {
         await proposeReminder(userId, message.chatId, text, reminderMatch[1], reminderMatch[2]);
@@ -128,6 +141,35 @@ class AgentRouter {
         return { success: true, message: await saveReply(`✅ Task created: *${task.title}*`) };
       }
 
+      const habitCmd = parseHabitCommand(text);
+      if (habitCmd?.action === "create") {
+        await createHabit(userId, habitCmd.name);
+        return { success: true, message: await saveReply(`✅ Habit tracked: *${habitCmd.name}*`) };
+      }
+      if (habitCmd?.action === "log") {
+        const result = await logHabit(userId, habitCmd.name);
+        if (result) {
+          return { success: true, message: await saveReply(`🔥 Logged *${result.habit.name}*! Keep the streak going.`) };
+        }
+        return { success: true, message: await saveReply(`Habit "${habitCmd.name}" not found. Create it with: track habit ${habitCmd.name}`) };
+      }
+
+      const smsExpense = parseBankSms(text);
+      if (smsExpense) {
+        const expense = await createExpenseFromParsed(userId, smsExpense, "sms");
+        return {
+          success: true,
+          message: await saveReply(`💳 Bank SMS parsed: *₹${expense.amount}* (${expense.category})${expense.merchant ? ` — ${expense.merchant}` : ""}`),
+        };
+      }
+
+      const expense = await createExpenseFromText(userId, text);
+      if (expense) {
+        return {
+          success: true,
+          message: await saveReply(`💰 Expense logged: *₹${expense.amount}* (${expense.category})${expense.merchant ? ` at ${expense.merchant}` : ""}`),
+        };
+      }
 
       const rememberedFact = await extractPersonalFact(userId, text);
       if (rememberedFact) {
@@ -146,6 +188,14 @@ class AgentRouter {
 
       // 2. Check if input is a Web Link URL
       if (isURL(text)) {
+        const dup = await findDuplicateKnowledge(userId, { sourceUrl: text });
+        if (dup.duplicate) {
+          return {
+            success: true,
+            message: await saveReply(`⚠️ Already saved: *${dup.existing.title}*\n🔗 ${dup.existing.sourceUrl}`),
+          };
+        }
+
         const processed = await processAndSynthesizeInput(text);
 
         const savedItem = await prisma.knowledgeItem.create({
@@ -162,7 +212,14 @@ class AgentRouter {
             content: processed.content || null,
           },
         });
+        await indexKnowledgeItemEmbedding(savedItem.id);
         await ingestContext(userId, `${savedItem.title}. ${savedItem.aiMemory || savedItem.summary || ""}`, savedItem.sourceUrl || text);
+        void autoLinkGraph(userId, `${savedItem.title}. ${savedItem.summary || ""}`, `knowledge:${savedItem.id}`, {
+          subject: savedItem.title,
+          subjectType: "resource",
+          relation: "mentions",
+        });
+        await publishAppEvent(userId, "knowledge_saved", { id: savedItem.id, title: savedItem.title });
 
         const reply = `✅ *Saved to AI Second Brain!*\n\n📌 *${savedItem.title}*\n💡 _${savedItem.aiMemory || savedItem.summary}_\n🏷️ Tags: \`${(Array.isArray(savedItem.tags) ? savedItem.tags : []).join(", ")}\`\n🔗 [Open Resource](${savedItem.sourceUrl})`;
 
@@ -173,13 +230,13 @@ class AgentRouter {
         };
       }
 
-      // 3. Otherwise, treat as a Knowledge Query / Search ("Ask Your Brain")
-      const searchResult = await queryKnowledgeVault(userId, text, conversationContext);
+      // 3. Otherwise, treat as a Knowledge Query — Exa.ai search first, then LLM synthesis + memory
+      const searchResult = await executeSmartSearch(userId, text, conversationContext, { useExa: true, source: "telegram" });
 
       return {
         success: true,
         message: await saveReply(searchResult.reply),
-        data: searchResult.matchingItems,
+        data: { matchingItems: searchResult.matchingItems.map((m) => m.item), exaResults: searchResult.exaResults },
       };
     } catch (error) {
       console.error("[AgentRouter Error]", error);

@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   title: "LifeFlow AI — Personal Life Operating System",
   description: "AI-powered personal life manager that proactively organizes, predicts, and recommends actions.",
   manifest: "/manifest.json",
+  icons: { icon: "/icon.svg", apple: "/icon.svg" },
   appleWebApp: { capable: true, title: "LifeFlow AI" },
 };
 

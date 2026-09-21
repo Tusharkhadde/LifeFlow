@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { trackedChatCompletion } from "@/lib/ai-telemetry";
 
 function normalize(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, " ").slice(0, 120);
@@ -38,6 +39,119 @@ export async function ingestContext(userId: string, text: string, source = text)
     const aboutMatch = sentence.match(/(?:about|regarding)\s+(.+)/i);
     if (aboutMatch) await entity(userId, aboutMatch[1], "topic");
   }
+}
+
+export interface GraphLinkInput {
+  entities?: Array<{ name: string; type?: string }>;
+  relations?: Array<{ from: string; to: string; relation: string }>;
+}
+
+export async function linkEntities(userId: string, input: GraphLinkInput, source: string) {
+  for (const item of input.entities || []) {
+    if (item.name) {
+      const contextEntity = await entity(userId, item.name, item.type || "concept");
+      if (contextEntity && item.type === "project") {
+        await prisma.project.upsert({
+          where: { userId_name: { userId, name: item.name.trim().slice(0, 120) } },
+          create: {
+            userId,
+            name: item.name.trim().slice(0, 120),
+            entityId: contextEntity.id,
+            metadata: { discoveredFrom: source },
+          },
+          update: { entityId: contextEntity.id, status: "active" },
+        });
+      }
+    }
+  }
+  for (const edge of input.relations || []) {
+    if (edge.from && edge.to) {
+      await relation(userId, edge.from, edge.to, (edge.relation || "related_to").replace(/\s+/g, "_").toLowerCase(), source);
+    }
+  }
+}
+
+function heuristicEntities(text: string): GraphLinkInput {
+  const entities: GraphLinkInput["entities"] = [];
+  const seen = new Set<string>();
+  const capitalized = text.match(/\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2}\b/g) || [];
+  for (const candidate of capitalized) {
+    const normalized = candidate.toLowerCase();
+    if (seen.has(normalized) || /^(The|This|That|I|We|You|It|My|Our|Today|Tomorrow|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(candidate)) continue;
+    seen.add(normalized);
+    entities.push({ name: candidate, type: "topic" });
+    if (entities.length >= 8) break;
+  }
+  for (const mention of text.match(/@([a-zA-Z0-9_]{2,30})/g) || []) {
+    entities.push({ name: mention.slice(1), type: "person" });
+  }
+  return { entities };
+}
+
+/**
+ * Auto-linked life graph: extract people, projects, merchants, and topics from any
+ * text the user produces and connect them. Uses the LLM when available, falls back
+ * to heuristics. Designed to run as a fire-and-forget side effect.
+ */
+export async function autoLinkGraph(
+  userId: string,
+  text: string,
+  source: string,
+  hints: { subject?: string; relation?: string; subjectType?: string } = {}
+) {
+  const cleanText = text.trim().slice(0, 4000);
+  if (!cleanText) return;
+
+  let extracted: GraphLinkInput | null = null;
+  const { getAIConfig } = await import("@/lib/ai-provider");
+  const config = getAIConfig();
+
+  if (config && cleanText.length > 40) {
+    try {
+      const { data } = await trackedChatCompletion({
+        userId,
+        operation: "graph_extract",
+        modelClass: "fast",
+        cacheTtlSeconds: 30 * 86400,
+        request: {
+          temperature: 0,
+          messages: [
+            {
+              role: "user",
+              content: `Extract a small knowledge graph from this text. Return JSON only:
+{"entities":[{"name":"...","type":"person|project|company|merchant|topic|place|tool"}],"relations":[{"from":"...","to":"...","relation":"works_on|mentions|owes|meets|uses|spent_at|belongs_to|related_to"}]}
+Max 8 entities, 8 relations. Use short canonical names.
+
+Text:
+${cleanText}`,
+            },
+          ],
+        },
+      });
+      const raw = (data as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content || "";
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) extracted = JSON.parse(match[0]) as GraphLinkInput;
+    } catch {
+      extracted = null;
+    }
+  }
+
+  if (!extracted) extracted = heuristicEntities(cleanText);
+
+  if (hints.subject) {
+    extracted.entities = [...(extracted.entities || []), { name: hints.subject, type: hints.subjectType || "concept" }];
+    extracted.relations = [
+      ...(extracted.relations || []),
+      ...(extracted.entities || [])
+        .filter((item) => item.name && item.name !== hints.subject)
+        .slice(0, 6)
+        .map((item) => ({ from: hints.subject as string, to: item.name, relation: hints.relation || "mentions" })),
+    ];
+  }
+
+  await linkEntities(userId, extracted, source).catch((error) => {
+    console.warn("[ContextGraph] autoLinkGraph failed:", error);
+  });
 }
 
 export async function getContextGraph(userId: string, query: string) {

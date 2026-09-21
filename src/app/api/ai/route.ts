@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAIConfig } from "@/lib/ai-provider";
+import { getAuthenticatedUserId } from "@/lib/auth-helpers";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = await getAuthenticatedUserId(request.headers);
+    const rate = await checkRateLimit(userId, "ai_chat");
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    }
     const body = await request.json();
     const { message, context } = body;
 

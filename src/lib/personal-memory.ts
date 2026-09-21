@@ -19,7 +19,7 @@ export async function extractPersonalFact(userId: string, text: string) {
   for (const candidate of patterns) {
     const match = text.trim().match(candidate.pattern);
     if (!match) continue;
-    const key = candidate.keyFromMatch ? match[1].trim().toLowerCase() : candidate.key;
+    const key = candidate.keyFromMatch ? match[1].trim().toLowerCase() : candidate.key || "note";
     const value = candidate.keyFromMatch ? match[2].trim() : match[1].trim();
     return rememberPersonalFact(userId, key, value, text);
   }

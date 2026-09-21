@@ -26,8 +26,45 @@ import { getAIConfig } from "@/lib/ai-provider";
 const conversationHistoryStore = new Map<number, BaseMessage[]>();
 const conversationSummaryStore = new Map<number, string>();
 
+async function loadConversationFromDb(userId: string, chatId: number): Promise<BaseMessage[]> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { userId_telegramChatId: { userId, telegramChatId: BigInt(chatId) } },
+    include: { messages: { orderBy: { createdAt: "asc" }, take: 20 } },
+  });
+  if (!conversation) return [];
+  return conversation.messages.map((msg) =>
+    msg.role === "assistant" ? new AIMessage(msg.content) : new HumanMessage(msg.content)
+  );
+}
+
+async function persistConversationMessage(
+  userId: string,
+  chatId: number,
+  role: "user" | "assistant",
+  content: string
+) {
+  const conversation = await prisma.conversation.upsert({
+    where: { userId_telegramChatId: { userId, telegramChatId: BigInt(chatId) } },
+    create: { userId, telegramChatId: BigInt(chatId) },
+    update: {},
+  });
+  await prisma.conversationMessage.create({
+    data: { conversationId: conversation.id, role, content },
+  });
+}
+
 export function getConversationHistory(telegramUserId: number): BaseMessage[] {
   return conversationHistoryStore.get(telegramUserId) || [];
+}
+
+export async function getConversationHistoryAsync(
+  userId: string,
+  telegramUserId: number,
+  chatId: number
+): Promise<BaseMessage[]> {
+  const cached = conversationHistoryStore.get(telegramUserId);
+  if (cached?.length) return cached;
+  return loadConversationFromDb(userId, chatId);
 }
 
 export function saveConversationHistory(
@@ -215,10 +252,12 @@ export async function runLangGraphAssistant(params: {
   chatId: number;
 }): Promise<{ success: boolean; message: string }> {
   try {
-    const history = getConversationHistory(params.telegramUserId);
+    const history = await getConversationHistoryAsync(params.userId, params.telegramUserId, params.chatId);
     const existingSummary = conversationSummaryStore.get(params.telegramUserId) || null;
     const userMessage = new HumanMessage(params.text);
     const currentMessages = [...history, userMessage];
+
+    await persistConversationMessage(params.userId, params.chatId, "user", params.text);
 
     const result = await langGraphAssistant.invoke({
       messages: currentMessages,
@@ -238,6 +277,7 @@ export async function runLangGraphAssistant(params: {
       [userMessage, new AIMessage(finalReply)],
       result.summaryMemory
     );
+    await persistConversationMessage(params.userId, params.chatId, "assistant", finalReply);
 
     return {
       success: true,

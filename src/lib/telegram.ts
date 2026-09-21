@@ -55,6 +55,21 @@ function splitMessage(text: string): string[] {
   return chunks;
 }
 
+export async function sendTelegramVoice(chatId: number, audioBuffer: Buffer, caption?: string) {
+  try {
+    const formData = new FormData();
+    formData.append("chat_id", String(chatId));
+    const blob = new Blob([new Uint8Array(audioBuffer)], { type: "audio/mpeg" });
+    formData.append("voice", blob, "briefing.mp3");
+    if (caption) formData.append("caption", caption);
+
+    const res = await fetch(`${TELEGRAM_API}/sendVoice`, { method: "POST", body: formData });
+    if (!res.ok) console.warn("[Telegram] sendVoice failed:", await res.text());
+  } catch (err) {
+    console.error("Telegram sendVoice error:", err);
+  }
+}
+
 function stripMarkdown(text: string): string {
   return text
     .replace(/\*([^*]+)\*/g, "$1")

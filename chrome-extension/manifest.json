@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "LifeFlow Copilot",
+  "version": "2.0.0",
+  "description": "Ask your LifeFlow second brain about any page, then save it with one click.",
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": {
+    "default_title": "Open LifeFlow Copilot"
+  }
+}

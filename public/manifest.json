@@ -1,0 +1,37 @@
+{
+  "name": "LifeFlow AI",
+  "short_name": "LifeFlow",
+  "description": "AI-powered personal life operating system",
+  "id": "/dashboard/today",
+  "start_url": "/dashboard/today",
+  "scope": "/",
+  "display": "standalone",
+  "categories": ["productivity", "utilities", "finance"],
+  "background_color": "#0a0a0a",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick capture",
+      "short_name": "Capture",
+      "url": "/dashboard"
+    },
+    {
+      "name": "Universal Inbox",
+      "short_name": "Inbox",
+      "url": "/dashboard/inbox"
+    },
+    {
+      "name": "Ask LifeFlow",
+      "short_name": "Ask",
+      "url": "/assistant"
+    }
+  ]
+}

@@ -1,39 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const publicRoutes = ["/login", "/signup", "/api/auth", "/api/telegram"];
+const publicExact = new Set(["/login", "/signup"]);
+
+function isPublicPath(pathname: string) {
+  if (publicExact.has(pathname)) return true;
+  if (pathname.startsWith("/s/")) return true;
+  if (pathname.startsWith("/api/auth")) return true;
+  if (pathname.startsWith("/api/telegram")) return true;
+  if (pathname.startsWith("/api/health")) return true;
+  if (pathname.startsWith("/api/v1")) return true;
+  if (pathname.startsWith("/api/mcp")) return true;
+  if (pathname.startsWith("/api/share/public")) return true;
+  if (pathname.startsWith("/api/weekly-review")) return true;
+  if (pathname.startsWith("/api/jobs/dispatch")) return true;
+  if (pathname.startsWith("/api/automation/run")) return true;
+  if (pathname.startsWith("/api/maintenance")) return true;
+  if (pathname.endsWith("/callback") && pathname.startsWith("/api/integrations/")) return true;
+  return false;
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const requestId = request.headers.get("x-request-id") || crypto.randomUUID();
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-request-id", requestId);
+  const next = () => {
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set("x-request-id", requestId);
+    return response;
+  };
 
-  // Lightweight cookie check — full session validation happens in API routes/pages
-  // Better Auth prefixes cookies with __Secure- on HTTPS sites
   const sessionToken =
     request.cookies.get("__Secure-better-auth.session_token") ||
     request.cookies.get("better-auth.session_token");
 
-  // Always show landing page to unauthenticated users on first visit
-  // Redirect authenticated users away from "/" to the dashboard
   if (pathname === "/") {
     if (sessionToken) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+      const response = NextResponse.redirect(new URL("/dashboard/today", request.url));
+      response.headers.set("x-request-id", requestId);
+      return response;
     }
-    return NextResponse.next();
+    return next();
   }
 
-  if (publicRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"))) {
-    return NextResponse.next();
+  if (isPublicPath(pathname)) {
+    return next();
   }
-
-
 
   if (pathname.startsWith("/api/")) {
-    if (pathname.startsWith("/api/auth")) {
-      return NextResponse.next();
-    }
-    if (!sessionToken) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    return NextResponse.next();
+    if (sessionToken) return next();
+    return NextResponse.json(
+      { error: "Unauthorized", requestId },
+      { status: 401, headers: { "x-request-id": requestId } }
+    );
   }
 
   if (!sessionToken) {
@@ -42,7 +61,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return next();
 }
 
 export const config = {

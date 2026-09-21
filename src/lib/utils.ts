@@ -40,7 +40,6 @@ export function getCategoryIcon(category: string): string {
     bill: "Receipt",
     document: "FileText",
     appointment: "Calendar",
-    goal: "Target",
     subscription: "RefreshCw",
     health: "Heart",
     education: "BookOpen",

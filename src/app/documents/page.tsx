@@ -3,10 +3,10 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-export default function DocumentsPage() {
+export default function DocumentsRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/dashboard");
+    router.replace("/dashboard/documents");
   }, [router]);
   return null;
 }

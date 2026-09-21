@@ -59,6 +59,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [mounted, refreshAll]);
 
   useEffect(() => {
+    if (!mounted) return;
+
+    const source = new EventSource("/api/events/stream");
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (["knowledge_saved", "document_processed", "search_completed", "expense_created", "habit_logged"].includes(data.type)) {
+          refreshAll();
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    return () => source.close();
+  }, [mounted, refreshAll]);
+
+  useEffect(() => {
     if (shouldRedirect) {
       router.push("/login");
     }

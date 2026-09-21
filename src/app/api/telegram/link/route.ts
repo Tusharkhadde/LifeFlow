@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { randomInt } from "crypto";
+import { consumeRateLimit } from "@/lib/distributed-rate-limit";
 
 // Generate a short link code for Telegram linking
 export async function POST(request: Request) {
@@ -11,6 +13,10 @@ export async function POST(request: Request) {
     }
 
     const userId = session.user.id;
+    const limit = await consumeRateLimit(`telegram-code:${userId}`, 5, 60 * 60 * 1000);
+    if (!limit.allowed) {
+      return NextResponse.json({ error: "Too many codes requested. Try again later." }, { status: 429 });
+    }
 
     // Ensure user exists in DB
     await prisma.user.upsert({
@@ -27,7 +33,7 @@ export async function POST(request: Request) {
     await prisma.linkCode.deleteMany({ where: { userId } });
 
     // Generate a 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomInt(100000, 1_000_000).toString();
 
     // Store the code with 5-minute expiry
     await prisma.linkCode.create({

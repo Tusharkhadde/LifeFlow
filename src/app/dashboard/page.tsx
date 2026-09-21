@@ -19,7 +19,13 @@ import {
   X,
   Bookmark,
   CheckCircle2,
+  Download,
+  Share2,
 } from "lucide-react";
+import { DashboardWidgets } from "@/components/DashboardWidgets";
+import { ProjectPicker } from "@/components/ProjectPicker";
+import { CitationPanel } from "@/components/CitationPanel";
+import type { Citation } from "@/lib/citations";
 
 export interface KnowledgeItem {
   id: string;
@@ -48,7 +54,9 @@ export default function DashboardPage() {
   const [askQuestion, setAskQuestion] = useState("");
   const [askLoading, setAskLoading] = useState(false);
   const [askResponse, setAskResponse] = useState<string | null>(null);
+  const [askCitations, setAskCitations] = useState<Citation[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   const fetchKnowledgeItems = useCallback(async () => {
     try {
@@ -77,13 +85,14 @@ export default function DashboardPage() {
       const res = await fetch("/api/knowledge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: inputUrlOrNote.trim() }),
+        body: JSON.stringify({ input: inputUrlOrNote.trim(), projectId }),
       });
 
       if (res.ok) {
         const data = await res.json();
         setItems((prev) => [data.item, ...prev]);
         setInputUrlOrNote("");
+        setProjectId(null);
         setNotification(`Memory extracted & saved: "${data.item.title}"`);
         setTimeout(() => setNotification(null), 4000);
       }
@@ -109,10 +118,30 @@ export default function DashboardPage() {
     }
   };
 
+  const handleShareItem = async (id: string) => {
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ knowledgeItemId: id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.link?.url) {
+        await navigator.clipboard.writeText(data.link.url);
+        setNotification("Public share link copied");
+        setTimeout(() => setNotification(null), 4000);
+      } else {
+        setNotification(data.error || "Could not create share link");
+      }
+    } catch (err) {
+      console.error("Failed to share item:", err);
+    }
+  };
+
   const handleDeleteItem = async (id: string) => {
     setItems((prev) => prev.filter((it) => it.id !== id));
     try {
-      await fetch("/api/knowledge", {
+      await fetch(`/api/knowledge?id=${id}`, {
         method: "DELETE",
       });
     } catch (err) {
@@ -126,6 +155,7 @@ export default function DashboardPage() {
 
     setAskLoading(true);
     setAskResponse(null);
+    setAskCitations([]);
     try {
       const res = await fetch("/api/knowledge/ask", {
         method: "POST",
@@ -136,6 +166,7 @@ export default function DashboardPage() {
       if (res.ok) {
         const data = await res.json();
         setAskResponse(data.reply);
+        setAskCitations(data.citations || []);
       }
     } catch (err) {
       console.error("Ask Brain error:", err);
@@ -206,7 +237,15 @@ export default function DashboardPage() {
             <span>Notion-Style Knowledge Engine</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight">AI Second Brain</h1>
-          <p className="text-muted-foreground text-sm max-w-xl">
+          <div className="flex gap-2 mt-2">
+            <a href="/api/export?format=json" className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20">
+              <Download size={14} /> Export JSON
+            </a>
+            <a href="/api/export?format=markdown" className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/80">
+              <Download size={14} /> Export MD
+            </a>
+          </div>
+          <p className="text-muted-foreground text-sm max-w-xl mt-2">
             Paste any web link or note. AI automatically extracts the core memory, generates tags, and indexes it for instant natural search.
           </p>
         </div>
@@ -221,6 +260,8 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      <DashboardWidgets />
 
       {/* Quick Add Bar (Notion Style) */}
       <form
@@ -237,6 +278,7 @@ export default function DashboardPage() {
             className="w-full bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground text-sm font-medium"
           />
         </div>
+        <ProjectPicker value={projectId} onChange={setProjectId} className="w-full sm:w-44" />
         <button
           type="submit"
           disabled={saving || !inputUrlOrNote.trim()}
@@ -391,6 +433,13 @@ export default function DashboardPage() {
                         <Star size={16} fill={item.favorite ? "currentColor" : "none"} />
                       </button>
                       <button
+                        onClick={() => handleShareItem(item.id)}
+                        className="p-1.5 rounded-lg text-muted-foreground/50 hover:text-primary hover:bg-muted transition-colors"
+                        title="Copy public share link"
+                      >
+                        <Share2 size={16} />
+                      </button>
+                      <button
                         onClick={() => handleDeleteItem(item.id)}
                         className="p-1.5 rounded-lg text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
                       >
@@ -530,6 +579,7 @@ export default function DashboardPage() {
                     <div className="whitespace-pre-wrap leading-relaxed text-foreground text-xs md:text-sm">
                       {askResponse}
                     </div>
+                    <CitationPanel citations={askCitations} />
                   </div>
                 ) : (
                   <div className="text-center py-12 text-muted-foreground space-y-2">

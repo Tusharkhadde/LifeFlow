@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { sendTelegramMessage } from "@/lib/telegram";
-import { getEnhancedDailyBriefing } from "@/lib/proactive-intelligence";
+import { enqueueJob } from "@/lib/job-queue";
 
 async function notify(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -16,27 +15,28 @@ async function notify(request: NextRequest) {
   }
 
   const now = new Date();
-  let sent = 0;
+  let queued = 0;
   for (const [userId, chatId] of userChats) {
-    const dueReminders = await prisma.reminder.findMany({
-      where: { userId, completed: false, remindAt: { lte: now }, OR: [{ lastNotifiedAt: null }, { lastNotifiedAt: { lt: new Date(now.getTime() - 20 * 60 * 60 * 1000) } }] },
-      orderBy: { remindAt: "asc" },
-    });
-    if (dueReminders.length) {
-      await sendTelegramMessage(chatId, `🔔 *Reminders*\n${dueReminders.map((reminder) => `• ${reminder.text}`).join("\n")}`);
-      await prisma.reminder.updateMany({ where: { id: { in: dueReminders.map((reminder) => reminder.id) } }, data: { lastNotifiedAt: now } });
-      sent += dueReminders.length;
-    }
     const link = links.find((candidate) => candidate.userId === userId && candidate.telegramChatId?.toString() === chatId.toString());
     const lastBriefingAt = link?.lastBriefingAt;
     const shouldSendBriefing = !lastBriefingAt || lastBriefingAt.toDateString() !== now.toDateString();
-    if (shouldSendBriefing && link) {
-      await sendTelegramMessage(chatId, await getEnhancedDailyBriefing(userId));
-      await prisma.telegramLink.update({ where: { id: link.id }, data: { lastBriefingAt: now } });
-    }
+    await enqueueJob(
+      "telegram.notify.user",
+      {
+        chatId,
+        sendBriefing: shouldSendBriefing,
+        telegramLinkId: link?.id,
+      },
+      {
+        userId,
+        idempotencyKey: `telegram-notify:${userId}:${now.toISOString().slice(0, 13)}`,
+        maxAttempts: 4,
+      }
+    );
+    queued++;
   }
 
-  return NextResponse.json({ ok: true, users: userChats.size, sent });
+  return NextResponse.json({ ok: true, users: userChats.size, queued });
 }
 
 export async function GET(request: NextRequest) { return notify(request); }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyOAuthState, getAppBaseUrl } from "@/lib/integrations/oauth-state";
-import { exchangeNotionCode, importNotionPages } from "@/lib/integrations/notion-sync";
+import { exchangeNotionCode } from "@/lib/integrations/notion-sync";
 import { upsertIntegration } from "@/lib/integrations/store";
+import { enqueueJob } from "@/lib/job-queue";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -34,11 +35,12 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const result = await importNotionPages(verified.userId, 15);
-
-    return NextResponse.redirect(
-      `${base}/dashboard/integrations?connected=notion&imported=${result.imported}`
+    await enqueueJob(
+      "notion.import",
+      { limit: 15 },
+      { userId: verified.userId, idempotencyKey: `notion-initial:${verified.userId}`, maxAttempts: 4 }
     );
+    return NextResponse.redirect(`${base}/dashboard/integrations?connected=notion&queued=1`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "oauth_failed";
     return NextResponse.redirect(`${base}/dashboard/integrations?error=${encodeURIComponent(msg)}`);
