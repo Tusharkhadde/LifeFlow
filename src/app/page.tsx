@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { motion, useInView } from "motion/react";
+import { motion, useInView } from "framer-motion";
 import { PremiumHero } from "@/components/ui/hero";
 import { GlowBorderCard } from "@/components/ui/glow-border-card";
 import { Button } from "@/components/ui/button";
@@ -68,6 +68,13 @@ const features = [
     title: "AI Assistant",
     desc: "Chat naturally. Your AI handles tasks, answers questions, and anticipates needs.",
     gradient: "from-purple-500/20 to-purple-500/5",
+    border: "aurora" as const,
+  },
+  {
+    icon: Zap,
+    title: "Public API",
+    desc: "API keys, Chrome clipper, webhooks, and share links. Built like a real SaaS OS.",
+    gradient: "from-indigo-500/20 to-indigo-500/5",
     border: "aurora" as const,
   },
 ];
