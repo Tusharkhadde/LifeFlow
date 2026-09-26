@@ -12,6 +12,10 @@ export interface KnowledgeItem {
   favorite: boolean;
   archived: boolean;
   metadata?: Record<string, unknown> | null;
+  expiryDate?: string | null;
+  extractedAmount?: number | null;
+  documentType?: string | null;
+  vendor?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,9 +1,9 @@
 import { scrapeWebPage } from "@/lib/web-scraper";
-import { prisma } from "@/lib/db";
-import { getPersonalMemoryContext } from "@/lib/personal-memory";
 import { getAIConfig } from "@/lib/ai-provider";
-import { getContextGraph, getRecentContextGraph } from "@/lib/context-graph";
-import { getProductivityContext } from "@/lib/productivity-actions";
+import { indexKnowledgeItemEmbedding } from "@/lib/hybrid-search";
+import { executeSmartSearch } from "@/lib/search-pipeline";
+
+export { indexKnowledgeItemEmbedding } from "@/lib/hybrid-search";
 
 export interface ProcessedKnowledge {
   title: string;
@@ -25,7 +25,8 @@ export function isURL(input: string): boolean {
 
 export async function processAndSynthesizeInput(
   rawInput: string,
-  forceType?: "link" | "note" | "document" | "audio"
+  forceType?: "link" | "note" | "document" | "audio",
+  hints?: { clippedText?: string; titleHint?: string }
 ): Promise<ProcessedKnowledge> {
   const isWebUrl = isURL(rawInput);
   let scrapedText = rawInput;
@@ -41,6 +42,22 @@ export async function processAndSynthesizeInput(
     favicon = scraped.favicon;
     pageTitle = scraped.title;
     pageDesc = scraped.description;
+  }
+
+  const clipped = (hints?.clippedText || "").replace(/\s+/g, " ").trim().slice(0, 8000);
+  const scrapeIsThin =
+    scrapedText.trim().length < 200 ||
+    /^(Saved (web link|URL|bookmark)|Bookmark for|Web page resource)/i.test(scrapedText.trim());
+  if (clipped && (scrapeIsThin || (isWebUrl && clipped.length >= 200))) {
+    scrapedText = clipped;
+    if (!pageDesc || /^(Saved bookmark|Bookmark for|Web page resource|Saved web link)/i.test(pageDesc)) {
+      pageDesc = clipped.slice(0, 240);
+    }
+  }
+  const titleHint = (hints?.titleHint || "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const host = sourceUrl ? safeHost(sourceUrl) : "";
+  if (titleHint && (!pageTitle || pageTitle === host)) {
+    pageTitle = titleHint;
   }
 
   const config = getAIConfig();
@@ -128,6 +145,14 @@ ${isWebUrl ? `Title: ${pageTitle}\nDescription: ${pageDesc}\nURL: ${sourceUrl}\n
   }
 }
 
+function safeHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 function generateFallbackTags(raw: string, title?: string, desc?: string): string[] {
   const combined = `${raw} ${title || ""} ${desc || ""}`.toLowerCase();
   const tags: string[] = [];
@@ -139,120 +164,22 @@ function generateFallbackTags(raw: string, title?: string, desc?: string): strin
   return tags;
 }
 
-export async function queryKnowledgeVault(userId: string, query: string, conversationContext = "") {
-  const [allItems, personalMemoryContext, graphContext, recentGraphContext, productivityContext] = await Promise.all([prisma.knowledgeItem.findMany({
-    where: { userId, archived: false },
-    orderBy: { createdAt: "desc" },
-  }), getPersonalMemoryContext(userId), getContextGraph(userId, query), getRecentContextGraph(userId), getProductivityContext(userId)]);
-
-  const apiKey = getAIConfig()?.apiKey;
-
-  if (allItems.length === 0 && !apiKey) {
-    return {
-      reply: "Your Knowledge Vault is currently empty. Try saving some notes or web links first!",
-      matchingItems: [],
-    };
-  }
-
-  const qLower = query.toLowerCase();
-  const queryWords = qLower.split(/\s+/).filter((w) => w.length > 2);
-
-  // Score matching items
-  const scoredItems = allItems.map((item) => {
-    let score = 0;
-    const titleLower = item.title.toLowerCase();
-    const memoryLower = (item.aiMemory || "").toLowerCase();
-    const summaryLower = (item.summary || "").toLowerCase();
-    const categoryLower = item.category.toLowerCase();
-    const tagsArray = (Array.isArray(item.tags) ? item.tags : []) as string[];
-    const tagsStr = tagsArray.join(" ").toLowerCase();
-
-    for (const word of queryWords) {
-      if (titleLower.includes(word)) score += 5;
-      if (tagsStr.includes(word)) score += 4;
-      if (memoryLower.includes(word)) score += 3;
-      if (categoryLower.includes(word)) score += 2;
-      if (summaryLower.includes(word)) score += 1;
-    }
-
-    return { item, score };
+export async function queryKnowledgeVault(
+  userId: string,
+  query: string,
+  conversationContext = "",
+  options: { useExa?: boolean } = {}
+) {
+  const result = await executeSmartSearch(userId, query, conversationContext, {
+    useExa: options.useExa ?? true,
+    storeMemory: true,
   });
 
-  const matching = scoredItems
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((e) => e.item);
-
-  // If no match found by score, return latest items for LLM context
-  const contextItems = matching.length > 0 ? matching.slice(0, 5) : allItems.slice(0, 5);
-
-  const config = getAIConfig();
-  const itemFormattedContext = contextItems
-    .map(
-      (it, idx) =>
-        `${idx + 1}. **${it.title}** (${it.type})\n   Memory: ${it.aiMemory || it.summary}\n   URL: ${it.sourceUrl || "N/A"}\n   Tags: ${(Array.isArray(it.tags) ? it.tags : []).join(", ")}`
-    )
-    .join("\n\n");
-
-  if (!config) {
-    const listResponse = contextItems
-      .map((it) => `• [${it.title}](${it.sourceUrl || "#"}) — ${it.aiMemory || it.summary}`)
-      .join("\n");
-    return {
-      reply: `Found matching items for "${query}":\n\n${listResponse}`,
-      matchingItems: contextItems,
-    };
-  }
-
-  const prompt = `You are LifeFlow AI Second Brain Assistant.
-The user is asking: "${query}"
-
-Recent conversation history (use it to resolve references such as "that", "it", or "the one I mentioned"):
-${conversationContext || "No previous conversation."}
-
-Personal memories (use only when relevant):
-${personalMemoryContext || "No personal memories stored."}
-
-Known relationships from the user's context graph:
-${[...new Set([...graphContext, ...recentGraphContext])].slice(0, 30).join("\n") || "No context graph relationships found."}
-
-Current life state:
-${productivityContext}
-
-Here are the user's saved items in their Second Brain:
-${itemFormattedContext || "No saved items matched or exist yet."}
-
-Formulate a helpful, conversational, human-like response using all relevant context above. For questions about today, priorities, or what matters, use the current life state first. Resolve references using conversation history and relationships. Never invent facts. Always include saved item titles and clickable URLs (e.g. [Title](URL)) when relevant.`;
-
-  try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
-        "HTTP-Referer": "https://lifeflow-ai.vercel.app",
-        "X-OpenRouter-Title": "LifeFlow Knowledge Assistant",
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-      }),
-    });
-
-    if (!response.ok) throw new Error("LLM API error");
-
-    const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "Here are your matching saved items:";
-    return { reply, matchingItems: contextItems };
-  } catch (err) {
-    console.error("[KnowledgeEngine] Query error:", err);
-    const listResponse = contextItems
-      .map((it) => `• [${it.title}](${it.sourceUrl || "#"}) — ${it.aiMemory || it.summary}`)
-      .join("\n");
-    return {
-      reply: `Here are your relevant saved items:\n\n${listResponse}`,
-      matchingItems: contextItems,
-    };
-  }
+  return {
+    reply: result.reply,
+    matchingItems: result.matchingItems.map((entry) => entry.item),
+    exaResults: result.exaResults,
+    sources: result.sources,
+    citations: result.citations,
+  };
 }

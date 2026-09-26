@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { enqueueJob } from "@/lib/job-queue";
 
 function isValidTimezone(timezone: string) {
   try {
@@ -55,14 +56,37 @@ export async function createTask(userId: string, title: string, dueText?: string
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { timezone: true } });
   const dueAt = dueText ? parseWhen(dueText, user?.timezone || "UTC") : null;
   if (dueText && !dueAt) throw new Error("I couldn't understand that task deadline.");
-  return prisma.task.create({ data: { userId, title: title.trim(), dueAt } });
+  const task = await prisma.task.create({ data: { userId, title: title.trim(), dueAt } });
+  await Promise.all([
+    enqueueJob(
+      "calendar.sync",
+      { type: "task", id: task.id },
+      { userId, idempotencyKey: `calendar:task:${task.id}` }
+    ),
+    enqueueJob(
+      "graph.auto_link",
+      {
+        text: task.title,
+        source: `task:${task.id}`,
+        hints: { subject: task.title, subjectType: "task", relation: "involves" },
+      },
+      { userId, idempotencyKey: `graph:task:${task.id}` }
+    ),
+  ]);
+  return task;
 }
 
 export async function createReminder(userId: string, text: string, when: string) {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { timezone: true } });
   const remindAt = parseWhen(when, user?.timezone || "UTC");
   if (!remindAt) throw new Error("I couldn't understand that reminder time.");
-  return prisma.reminder.create({ data: { userId, text, remindAt } });
+  const reminder = await prisma.reminder.create({ data: { userId, text, remindAt } });
+  await enqueueJob(
+    "calendar.sync",
+    { type: "reminder", id: reminder.id },
+    { userId, idempotencyKey: `calendar:reminder:${reminder.id}` }
+  );
+  return reminder;
 }
 
 export async function getDailyBriefing(userId: string) {

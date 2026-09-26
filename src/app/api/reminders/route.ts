@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthenticatedUserId } from "@/lib/auth-helpers";
 import { publishAppEvent } from "@/lib/events";
+import { enqueueJob } from "@/lib/job-queue";
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,6 +33,11 @@ export async function POST(request: NextRequest) {
     });
 
     await publishAppEvent(userId, "reminder_created", { id: reminder.id, text: reminder.text });
+    await enqueueJob(
+      "calendar.sync",
+      { type: "reminder", id: reminder.id },
+      { userId, idempotencyKey: `calendar:reminder:${reminder.id}` }
+    );
     return NextResponse.json({ reminder }, { status: 201 });
   } catch (error) {
     console.error("POST /api/reminders error:", error);
@@ -56,7 +62,12 @@ export async function PATCH(request: NextRequest) {
       },
     });
 
-    await publishAppEvent(userId, "reminder_updated", { id });
+    await publishAppEvent(userId, "reminder_updated", { id, completed });
+    await enqueueJob(
+      completed === true ? "calendar.remove" : "calendar.sync",
+      { type: "reminder", id },
+      { userId }
+    );
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("PATCH /api/reminders error:", error);
@@ -71,6 +82,7 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "ID is required" }, { status: 400 });
 
+    await enqueueJob("calendar.remove", { type: "reminder", id }, { userId });
     await prisma.reminder.deleteMany({ where: { id, userId } });
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -8,6 +8,9 @@
 
 # testing
 /coverage
+/backups
+/playwright-report
+/test-results
 
 # next.js
 /.next/
@@ -15,6 +18,7 @@
 
 # production
 /build
+/chrome-extension/dist
 
 # misc
 .DS_Store

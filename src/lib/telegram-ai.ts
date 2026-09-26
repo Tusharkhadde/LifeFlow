@@ -1,4 +1,5 @@
 import { queryKnowledgeVault } from "@/lib/knowledge-engine";
+import { getAIConfig } from "@/lib/ai-provider";
 
 // ---- Model Registry ----
 
@@ -17,7 +18,7 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
 ];
 
 export function getDefaultModel(): string {
-  return process.env.OPENAI_MODEL || AVAILABLE_MODELS[0].id;
+  return process.env.HF_MODEL || process.env.OPENAI_MODEL || AVAILABLE_MODELS[0].id;
 }
 
 export function getDefaultVisionModel(): string {
@@ -36,25 +37,22 @@ export function resolveVisionModel(preferredModel?: string): string {
 // ---- AI call ----
 
 export async function callAI(systemPrompt: string, userMessage: string, maxTokens: number, temperature: number, modelOverride?: string): Promise<string | null> {
-  const baseUrl = process.env.OPENAI_BASE_URL;
-  const model = modelOverride || process.env.OPENAI_MODEL;
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!baseUrl || !model || !apiKey) {
+  const config = getAIConfig(modelOverride);
+  if (!config) {
     return null;
   }
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "HTTP-Referer": "https://lifeflow-ai.vercel.app",
         "X-OpenRouter-Title": "LifeFlow AI Second Brain",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -80,6 +78,28 @@ export async function handleMessage(message: string, userId: string): Promise<st
   return result.reply;
 }
 
+export async function transcribeAudio(audio: Buffer, fileName = "voice.ogg"): Promise<string | null> {
+  const config = getAIConfig(process.env.HF_TRANSCRIPTION_MODEL || process.env.OPENAI_TRANSCRIPTION_MODEL || "openai/whisper-large-v3-turbo");
+  if (!config) return null;
+
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(audio)]), fileName);
+    form.append("model", config.model);
+    const response = await fetch(`${config.baseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      body: form,
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return typeof data.text === "string" ? data.text.trim() : null;
+  } catch (error) {
+    console.error("[Telegram AI] Transcription error:", error);
+    return null;
+  }
+}
+
 // ---- Document/Image Analysis ----
 
 export interface DocumentAnalysis {
@@ -94,11 +114,8 @@ export interface DocumentAnalysis {
 }
 
 async function callVisionAI(imageBase64: string, mimeType: string, caption?: string, modelOverride?: string): Promise<string | null> {
-  const baseUrl = process.env.OPENAI_BASE_URL;
-  const model = modelOverride || resolveVisionModel(process.env.OPENAI_MODEL);
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!baseUrl || !model || !apiKey) {
+  const config = getAIConfig(modelOverride || resolveVisionModel(process.env.OPENAI_MODEL));
+  if (!config) {
     return null;
   }
 
@@ -107,16 +124,16 @@ async function callVisionAI(imageBase64: string, mimeType: string, caption?: str
     : `Analyze this document/image. Extract: document type, name/title, key summary. Respond in JSON format only: { "type": string, "name": string, "category": string, "keyInfo": {string: string}, "confidence": number }.`;
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "HTTP-Referer": "https://lifeflow-ai.vercel.app",
         "X-OpenRouter-Title": "LifeFlow AI",
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [
           {
             role: "user",
@@ -172,6 +189,7 @@ const telegramAI = {
   getModelInfo,
   resolveVisionModel,
   callAI,
+  transcribeAudio,
   AVAILABLE_MODELS,
 };
 

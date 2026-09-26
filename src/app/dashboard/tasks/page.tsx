@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CheckSquare, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ProjectPicker } from "@/components/ProjectPicker";
 
 interface Task {
   id: string;
@@ -16,6 +17,8 @@ interface Task {
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function loadTasks() {
@@ -36,10 +39,12 @@ export default function TasksPage() {
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, dueAt: dueAt || undefined, projectId }),
     });
     if (res.ok) {
       setTitle("");
+      setDueAt("");
+      setProjectId(null);
       await loadTasks();
     }
   }
@@ -65,8 +70,10 @@ export default function TasksPage() {
         <p className="text-muted-foreground mt-1">Synced with your Telegram assistant.</p>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row gap-2">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="New task…" onKeyDown={(e) => e.key === "Enter" && addTask()} />
+        <Input type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className="sm:w-56" />
+        <ProjectPicker value={projectId} onChange={setProjectId} className="sm:w-44" />
         <Button onClick={addTask}><Plus size={16} className="mr-1" /> Add</Button>
       </div>
 
@@ -81,7 +88,12 @@ export default function TasksPage() {
               <button onClick={() => toggleTask(task)} className={`rounded-lg p-2 ${task.completed ? "text-emerald-500" : "text-muted-foreground"}`}>
                 <CheckSquare size={18} />
               </button>
-              <span className={`flex-1 ${task.completed ? "line-through text-muted-foreground" : ""}`}>{task.title}</span>
+              <span className={`flex-1 ${task.completed ? "line-through text-muted-foreground" : ""}`}>
+                {task.title}
+                {task.dueAt && (
+                  <span className="ml-2 text-xs text-muted-foreground">{new Date(task.dueAt).toLocaleString()}</span>
+                )}
+              </span>
               <button onClick={() => deleteTask(task.id)} className="text-muted-foreground hover:text-destructive p-2">
                 <Trash2 size={16} />
               </button>

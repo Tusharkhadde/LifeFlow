@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { getAIConfig } from "@/lib/ai-provider";
 import { createReminder, formatUserDate } from "@/lib/productivity-actions";
+import { createInboxItem } from "@/lib/inbox-actions";
+import { InboxStatus } from "@prisma/client";
 
 interface TriageResult {
   summary: string;
@@ -50,9 +52,20 @@ export async function triageInbox(text: string): Promise<TriageResult | null> {
 export async function proposeReminder(userId: string, telegramChatId: number, source: string, text: string, when: string) {
   const existing = await prisma.pendingAction.findUnique({ where: { userId_telegramChatId: { userId, telegramChatId: BigInt(telegramChatId) } } });
   if (existing) await prisma.pendingAction.delete({ where: { id: existing.id } });
-  return prisma.pendingAction.create({
+  const pending = await prisma.pendingAction.create({
     data: { userId, telegramChatId: BigInt(telegramChatId), action: "create_reminder", payload: { text, when }, source, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
   });
+  await createInboxItem(userId, {
+    source: "telegram",
+    sourceRef: pending.id,
+    kind: "reminder",
+    title: text,
+    summary: `Telegram proposed reminder: ${when}`,
+    payload: { text, when },
+    forceReview: true,
+    priority: 60,
+  });
+  return pending;
 }
 
 export async function resolvePendingAction(userId: string, telegramChatId: number, approved: boolean) {
@@ -62,10 +75,24 @@ export async function resolvePendingAction(userId: string, telegramChatId: numbe
     return { message: "There is no pending action to confirm." };
   }
   await prisma.pendingAction.delete({ where: { id: pending.id } });
-  if (!approved) return { message: "Okay, I won't do that." };
+  if (!approved) {
+    await prisma.inboxItem.updateMany({
+      where: { userId, source: "telegram", sourceRef: pending.id },
+      data: { status: InboxStatus.DISMISSED, triagedAt: new Date() },
+    });
+    return { message: "Okay, I won't do that." };
+  }
   if (pending.action === "create_reminder") {
     const payload = pending.payload as { text: string; when: string };
     const reminder = await createReminder(userId, payload.text, payload.when);
+    await prisma.inboxItem.updateMany({
+      where: { userId, source: "telegram", sourceRef: pending.id },
+      data: {
+        status: InboxStatus.ACCEPTED,
+        triagedAt: new Date(),
+        payload: { ...payload, materialized: { type: "reminder", id: reminder.id } },
+      },
+    });
     return { message: `✅ Reminder set for ${await formatUserDate(userId, reminder.remindAt)}: *${reminder.text}*` };
   }
   return { message: "I couldn't complete that action." };

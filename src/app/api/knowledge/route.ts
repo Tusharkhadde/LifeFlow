@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthenticatedUserId } from "@/lib/auth-helpers";
-import { processAndSynthesizeInput, indexKnowledgeItemEmbedding } from "@/lib/knowledge-engine";
+import { processAndSynthesizeInput } from "@/lib/knowledge-engine";
 import { ingestContext } from "@/lib/context-graph";
 import { publishAppEvent } from "@/lib/events";
+import { findDuplicateKnowledge } from "@/lib/duplicate-detection";
+import { enqueueJob } from "@/lib/job-queue";
+import { linkToProject } from "@/lib/projects";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,6 +16,7 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category");
     const tag = searchParams.get("tag");
     const favorite = searchParams.get("favorite");
+    const projectId = searchParams.get("projectId");
 
     const whereClause: Record<string, unknown> = {
       userId,
@@ -21,6 +25,13 @@ export async function GET(request: NextRequest) {
 
     if (category) whereClause.category = { equals: category, mode: "insensitive" };
     if (favorite === "true") whereClause.favorite = true;
+    if (projectId) {
+      const links = await prisma.projectLink.findMany({
+        where: { userId, projectId, targetType: { in: ["knowledge", "meeting"] } },
+        select: { targetId: true },
+      });
+      whereClause.id = { in: links.map((link) => link.targetId) };
+    }
 
     if (search) {
       whereClause.OR = [
@@ -55,14 +66,20 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await getAuthenticatedUserId(request.headers);
     const body = await request.json();
-    const { input, type } = body;
+    const { input, type, projectId } = body;
 
     if (!input || typeof input !== "string" || !input.trim()) {
       return NextResponse.json({ error: "Input text or URL is required" }, { status: 400 });
     }
 
-    // Auto-scrape web link or summarize text note via AI Knowledge Engine
-    const processed = await processAndSynthesizeInput(input.trim(), type);
+    const trimmed = input.trim();
+    const isUrl = /^https?:\/\//i.test(trimmed);
+    const dup = await findDuplicateKnowledge(userId, { sourceUrl: isUrl ? trimmed : null, title: trimmed.slice(0, 80) });
+    if (dup.duplicate) {
+      return NextResponse.json({ error: "Duplicate item", existing: dup.existing }, { status: 409 });
+    }
+
+    const processed = await processAndSynthesizeInput(trimmed, type);
 
     const item = await prisma.knowledgeItem.create({
       data: {
@@ -78,8 +95,28 @@ export async function POST(request: NextRequest) {
         content: processed.content || null,
       },
     });
-    await indexKnowledgeItemEmbedding(item.id);
     await ingestContext(userId, `${item.title}. ${item.aiMemory || item.summary || ""}`, item.sourceUrl || input.trim());
+    await Promise.all([
+      enqueueJob(
+        "embedding.index",
+        { itemId: item.id },
+        { userId, idempotencyKey: `embedding:${item.id}` }
+      ),
+      enqueueJob(
+        "graph.auto_link",
+        {
+          text: `${item.title}. ${item.summary || ""} ${(item.content || "").slice(0, 1500)}`,
+          source: `knowledge:${item.id}`,
+          hints: {
+            subject: item.title,
+            subjectType: item.type === "link" ? "resource" : "note",
+            relation: "mentions",
+          },
+        },
+        { userId, idempotencyKey: `graph:knowledge:${item.id}` }
+      ),
+    ]);
+    if (projectId) await linkToProject(userId, projectId, "knowledge", item.id);
     await publishAppEvent(userId, "knowledge_saved", { id: item.id, title: item.title });
 
     return NextResponse.json({ item }, { status: 201 });

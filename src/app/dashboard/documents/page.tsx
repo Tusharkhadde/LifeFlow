@@ -6,6 +6,7 @@ import { FileText, Upload, AlertTriangle, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatCurrency, getDaysUntil } from "@/lib/utils";
 import { KnowledgeItem } from "@/lib/types";
+import { waitForJob } from "@/lib/job-client";
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<KnowledgeItem[]>([]);
@@ -26,7 +27,7 @@ export default function DocumentsPage() {
     loadDocuments();
   }, [loadDocuments]);
 
-  async function processUpload(payload: { text?: string; imageBase64?: string; fileName?: string }) {
+  async function processUpload(payload: { text?: string; imageBase64?: string; fileName?: string; mimeType?: string }) {
     setUploading(true);
     try {
       const res = await fetch("/api/documents", {
@@ -35,6 +36,11 @@ export default function DocumentsPage() {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
+        const data = await res.json();
+        if (data.job?.id) {
+          const job = await waitForJob(data.job.id);
+          if (job.status !== "COMPLETED") throw new Error(job.lastError || "Document processing failed");
+        }
         await loadDocuments();
         setTextInput("");
       }
@@ -52,7 +58,7 @@ export default function DocumentsPage() {
       let binary = "";
       for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
       const base64 = btoa(binary);
-      await processUpload({ imageBase64: base64, fileName: file.name });
+      await processUpload({ imageBase64: base64, fileName: file.name, mimeType: file.type });
     } else {
       const text = await file.text();
       await processUpload({ text, fileName: file.name });

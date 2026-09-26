@@ -15,6 +15,7 @@ import {
   Bell,
   Shield,
   Palette,
+  Bot,
   LogOut,
   Send,
   Link2,
@@ -38,8 +39,33 @@ export default function SettingsPage() {
   const [unlinkLoading, setUnlinkLoading] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [aiPersona, setAiPersona] = useState("assistant");
+  const [voiceBriefing, setVoiceBriefing] = useState(false);
+  const [monthlyAiBudgetUsd, setMonthlyAiBudgetUsd] = useState("");
+  const [preferredFastModel, setPreferredFastModel] = useState("");
+  const [personas, setPersonas] = useState<Record<string, { name: string; description: string }>>({});
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.settings) {
+          setAiPersona(d.settings.aiPersona || "assistant");
+          setVoiceBriefing(d.settings.voiceBriefingEnabled || false);
+          setMonthlyAiBudgetUsd(d.settings.monthlyAiBudgetUsd ? String(d.settings.monthlyAiBudgetUsd) : "");
+          setPreferredFastModel(d.settings.preferredFastModel || "");
+        }
+        setPersonas(d.personas || {});
+      })
+      .catch(() => {});
+  }, [mounted]);
+
+  async function updateSettings(data: Record<string, unknown>) {
+    await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  }
 
   // Fetch Telegram link status
   useEffect(() => {
@@ -116,6 +142,17 @@ export default function SettingsPage() {
         <p className="text-muted-foreground mt-1">
           Customize your LifeFlow experience
         </p>
+        <div className="mt-3 flex gap-3 text-sm">
+          <button
+            className="text-primary hover:underline"
+            onClick={() => window.dispatchEvent(new Event("lifeflow-tour"))}
+          >
+            Restart product tour
+          </button>
+          <a href="/settings/privacy" className="text-primary hover:underline">
+            Open Privacy Center
+          </a>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -178,6 +215,60 @@ export default function SettingsPage() {
                   <span className="text-sm opacity-70">{lang.nativeLabel}</span>
                 </button>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="sm:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bot size={18} className="text-primary" />
+              AI Persona
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {Object.entries(personas).map(([id, p]) => (
+                <button
+                  key={id}
+                  onClick={() => { setAiPersona(id); updateSettings({ aiPersona: id }); }}
+                  className={`p-3 rounded-xl text-left transition-all ${aiPersona === id ? "gradient-bg text-white" : "bg-muted/50 hover:bg-muted"}`}
+                >
+                  <div className="font-medium text-sm">{p.name}</div>
+                  <div className="text-xs opacity-70 mt-0.5">{p.description}</div>
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 mt-4 text-sm">
+              <input
+                type="checkbox"
+                checked={voiceBriefing}
+                onChange={(e) => { setVoiceBriefing(e.target.checked); updateSettings({ voiceBriefingEnabled: e.target.checked }); }}
+              />
+              Enable voice briefing on Telegram /voice
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2 mt-4">
+              <label className="text-sm space-y-1">
+                <span className="text-muted-foreground">Monthly AI budget (USD)</span>
+                <input
+                  className="w-full rounded-lg border bg-background px-3 py-2"
+                  inputMode="decimal"
+                  placeholder="No limit"
+                  value={monthlyAiBudgetUsd}
+                  onChange={(e) => setMonthlyAiBudgetUsd(e.target.value)}
+                  onBlur={() => updateSettings({ monthlyAiBudgetUsd: monthlyAiBudgetUsd || null })}
+                />
+              </label>
+              <label className="text-sm space-y-1">
+                <span className="text-muted-foreground">Fast model override</span>
+                <input
+                  className="w-full rounded-lg border bg-background px-3 py-2"
+                  placeholder="OPENAI_FAST_MODEL"
+                  value={preferredFastModel}
+                  onChange={(e) => setPreferredFastModel(e.target.value)}
+                  onBlur={() => updateSettings({ preferredFastModel: preferredFastModel || null })}
+                />
+              </label>
             </div>
           </CardContent>
         </Card>

@@ -7,6 +7,11 @@ const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
 const githubClientId = process.env.GITHUB_CLIENT_ID;
 const githubClientSecret = process.env.GITHUB_CLIENT_SECRET;
+const authSecret = process.env.BETTER_AUTH_SECRET;
+
+if (!authSecret || authSecret.length < 32) {
+  throw new Error("BETTER_AUTH_SECRET must be configured with at least 32 characters");
+}
 
 const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
 
@@ -48,7 +53,7 @@ export const auth = betterAuth({
     provider: "postgresql",
   }),
   baseURL: getBaseURL(),
-  secret: process.env.BETTER_AUTH_SECRET || "0L9fiiafx+Wbgg4l/y/WWszY3PvlF3GEbd9vNUDYkI4=",
+  secret: authSecret,
   trustedOrigins: Array.from(new Set(trustedOrigins)),
   emailAndPassword: {
     enabled: true,

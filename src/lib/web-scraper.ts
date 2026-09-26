@@ -1,3 +1,5 @@
+import { assertSafeOutboundUrl, safeFetch } from "@/lib/url-guard";
+
 export interface ScrapedWebPage {
   url: string;
   domain: string;
@@ -19,6 +21,7 @@ export async function scrapeWebPage(inputUrl: string): Promise<ScrapedWebPage> {
   } catch {
     throw new Error(`Invalid URL format: "${inputUrl}"`);
   }
+  await assertSafeOutboundUrl(parsedUrl);
 
   const domain = parsedUrl.hostname.replace(/^www\./, "");
   const defaultFavicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
@@ -27,14 +30,14 @@ export async function scrapeWebPage(inputUrl: string): Promise<ScrapedWebPage> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
-    const response = await fetch(parsedUrl.toString(), {
+    const response = await safeFetch(parsedUrl, {
       signal: controller.signal,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-    });
+    }, { maxRedirects: 3 });
 
     clearTimeout(timeoutId);
 

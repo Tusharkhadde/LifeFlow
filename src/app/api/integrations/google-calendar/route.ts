@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUserId } from "@/lib/auth-helpers";
 import { deleteIntegration } from "@/lib/integrations/store";
-import { fullGoogleCalendarSync, importUpcomingCalendarEvents } from "@/lib/integrations/calendar-sync";
+import { importUpcomingCalendarEvents } from "@/lib/integrations/calendar-sync";
+import { enqueueJob } from "@/lib/job-queue";
 
 export async function DELETE(request: NextRequest) {
   try {
@@ -24,8 +25,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result);
     }
 
-    const result = await fullGoogleCalendarSync(userId);
-    return NextResponse.json(result);
+    const hour = new Date().toISOString().slice(0, 13);
+    const job = await enqueueJob(
+      "calendar.full_sync",
+      {},
+      { userId, idempotencyKey: `calendar-full:${userId}:${hour}`, maxAttempts: 4 }
+    );
+    return NextResponse.json({ queued: true, job }, { status: 202 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Sync failed" },

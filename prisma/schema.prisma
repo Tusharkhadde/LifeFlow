@@ -7,6 +7,35 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum JobStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  FAILED
+  DEAD
+}
+
+enum InboxStatus {
+  PENDING
+  SNOOZED
+  ACCEPTED
+  DISMISSED
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum AutomationRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
 model User {
   id              String          @id
   name            String?
@@ -29,6 +58,37 @@ model User {
   pendingActions  PendingAction[]
   contextEntities ContextEntity[]
   contextRelations ContextRelation[]
+  appEvents       AppEvent[]
+  expenses        Expense[]
+  habits          Habit[]
+  habitLogs       HabitLog[]
+  searchHistory   SearchHistory[]
+  collections     Collection[]
+  usageLogs       UsageLog[]
+  userSettings    UserSettings?
+  budgets         Budget[]
+  savingsGoals    SavingsGoal[]
+  recurringBills  RecurringBill[]
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  workspaceMembers WorkspaceMember[]
+  workspaceShares WorkspaceShare[]
+  webhooks        Webhook[]
+  integrations    Integration[]
+  calendarSyncMaps CalendarSyncMap[]
+  apiKeys         ApiKey[]
+  shareLinks      ShareLink[]
+  notifications   Notification[]
+  jobs            Job[]
+  aiUsageLogs     AiUsageLog[]
+  aiCaches        AiCache[]
+  integrationHealth IntegrationHealth[]
+  auditLogs       AuditLog[]
+  deletionRequests DataDeletionRequest[]
+  inboxItems      InboxItem[]
+  projects        Project[]
+  projectLinks    ProjectLink[]
+  automationRules AutomationRule[]
+  automationRuns  AutomationRun[]
   sessions        Session[]
   accounts        Account[]
 }
@@ -211,21 +271,549 @@ model ContextRelation {
 }
 
 model KnowledgeItem {
+  id              String    @id @default(uuid())
+  userId          String
+  title           String
+  content         String?   @db.Text
+  summary         String?   @db.Text
+  aiMemory        String?   @db.Text
+  type            String    @default("link") // "link" | "note" | "document" | "audio"
+  sourceUrl       String?
+  favicon         String?
+  category        String    @default("general")
+  tags            Json?
+  favorite        Boolean   @default(false)
+  archived        Boolean   @default(false)
+  metadata        Json?
+  embedding       Json?
+  expiryDate      DateTime?
+  extractedAmount Float?
+  documentType    String?
+  vendor          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shareLinks      ShareLink[]
+
+  @@index([userId, expiryDate])
+  @@index([userId, type])
+}
+
+model AppEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  userId      String
+  amount      Float
+  currency    String   @default("INR")
+  category    String   @default("general")
+  merchant    String?
+  description String?
+  source      String   @default("manual")
+  spentAt     DateTime @default(now())
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, spentAt])
+  @@index([userId, category])
+}
+
+model Habit {
+  id          String     @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  frequency   String     @default("daily")
+  targetDays  Int        @default(7)
+  archived    Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs        HabitLog[]
+
+  @@unique([userId, name])
+  @@index([userId, archived])
+}
+
+model HabitLog {
+  id        String   @id @default(uuid())
+  userId    String
+  habitId   String
+  loggedAt  DateTime @default(now())
+  note      String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  @@index([habitId, loggedAt])
+}
+
+model SearchHistory {
+  id         String   @id @default(uuid())
+  userId     String
+  query      String
+  answer     String?  @db.Text
+  source     String   @default("telegram")
+  exaUsed    Boolean  @default(false)
+  sourceUrls Json?
+  citations  Json?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Collection {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  color       String   @default("#6366f1")
+  itemIds     Json     @default("[]")
+  auto        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+}
+
+model UsageLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, action, createdAt])
+}
+
+model UserSettings {
+  userId                 String    @id
+  aiPersona              String    @default("assistant")
+  voiceBriefingEnabled   Boolean   @default(false)
+  monthlyBudgetLimit     Float?
+  monthlyAiBudgetUsd     Float?
+  preferredFastModel     String?
+  triageMode             String    @default("auto")
+  dailyTriageEnabled     Boolean   @default(true)
+  lastTriageAt           DateTime?
+  productTourCompletedAt DateTime?
+  demoSeededAt           DateTime?
+  retentionDays          Int       @default(365)
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Budget {
+  id          String   @id @default(uuid())
+  userId      String
+  category    String
+  limitAmount Float
+  period      String   @default("monthly")
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, period])
+}
+
+model SavingsGoal {
+  id            String    @id @default(uuid())
+  userId        String
+  name          String
+  targetAmount  Float
+  currentAmount Float     @default(0)
+  deadline      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RecurringBill {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  amount     Float
+  category   String    @default("bills")
+  frequency  String    @default("monthly")
+  merchant   String?
+  nextDueAt  DateTime?
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, nextDueAt])
+}
+
+model Workspace {
+  id         String            @id @default(uuid())
+  name       String
+  ownerId    String
+  inviteCode String            @unique
+  createdAt  DateTime          @default(now())
+  owner      User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members    WorkspaceMember[]
+  shares     WorkspaceShare[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  joinedAt    DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model WorkspaceShare {
+  id          String    @id @default(uuid())
+  workspaceId String
+  userId      String
+  targetType  String
+  targetId    String
+  access      String    @default("view")
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, targetType, targetId])
+  @@index([userId, createdAt])
+}
+
+model Webhook {
+  id        String   @id @default(uuid())
+  userId    String
+  url       String
+  events    Json     @default("[]")
+  secret    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([userId, active])
+}
+
+model Integration {
+  id           String    @id @default(uuid())
+  userId       String
+  provider     String
+  accessToken  String    @db.Text
+  refreshToken String?   @db.Text
+  expiresAt    DateTime?
+  scope        String?
+  metadata     Json?
+  syncEnabled  Boolean   @default(true)
+  lastSyncAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId, provider])
+}
+
+model CalendarSyncMap {
+  id            String   @id @default(uuid())
+  userId        String
+  lifeflowType  String
+  lifeflowId    String
+  googleEventId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lifeflowType, lifeflowId])
+  @@index([userId, googleEventId])
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  keyHash    String    @unique
+  prefix     String
+  scopes     Json      @default("[\"*\"]")
+  rateLimitPerHour Int @default(120)
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+}
+
+model ShareLink {
+  id              String         @id @default(uuid())
+  userId          String
+  knowledgeItemId String
+  token           String         @unique
+  viewCount       Int            @default(0)
+  expiresAt       DateTime?
+  createdAt       DateTime       @default(now())
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeItem   KnowledgeItem  @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Notification {
   id        String   @id @default(uuid())
   userId    String
   title     String
-  content   String?  @db.Text
-  summary   String?  @db.Text
-  aiMemory  String?  @db.Text
-  type      String   @default("link") // "link" | "note" | "document" | "audio"
-  sourceUrl String?
-  favicon   String?
-  category  String   @default("general")
-  tags      Json? // Array of string tags (e.g. ["react", "ui", "components"])
-  favorite  Boolean  @default(false)
-  archived  Boolean  @default(false)
-  metadata  Json? // Additional scraped or parsed details
+  message   String   @db.Text
+  type      String
+  href      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+}
+
+model Job {
+  id             String    @id @default(uuid())
+  name           String
+  userId         String?
+  payload        Json
+  idempotencyKey String?   @unique
+  status         JobStatus @default(PENDING)
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  runAfter       DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?   @db.Text
+  result         Json?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAfter])
+  @@index([userId, name, createdAt])
+}
+
+model AiUsageLog {
+  id           String   @id @default(uuid())
+  userId       String
+  provider     String
+  operation    String
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  latencyMs    Int?
+  requestId    String?
+  jobId        String?
+  cacheHit     Boolean  @default(false)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([operation, createdAt])
+}
+
+model AiCache {
+  id        String   @id @default(uuid())
+  userId    String?
+  key       String   @unique
+  operation String
+  model     String
+  response  Json
+  expiresAt DateTime
+  hitCount  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, operation, expiresAt])
+  @@index([expiresAt])
+}
+
+model IntegrationHealth {
+  id            String    @id @default(uuid())
+  userId        String
+  provider      String
+  status        String    @default("unknown")
+  lastSuccessAt DateTime?
+  lastFailureAt DateTime?
+  lastError     String?   @db.Text
+  latencyMs     Int?
+  metadata      Json?
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([status, updatedAt])
+}
+
+model WebhookDelivery {
+  id          String    @id @default(uuid())
+  webhookId   String
+  userId      String
+  eventId     String?
+  eventType   String
+  status      Int?
+  attempt     Int       @default(1)
+  responseMs  Int?
+  error       String?   @db.Text
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  webhook     Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@unique([webhookId, eventId, attempt])
+  @@index([userId, createdAt])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String
+  actorType    String   @default("user")
+  actorId      String?
+  action       String
+  resourceType String?
+  resourceId   String?
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+model DataDeletionRequest {
+  id          String    @id @default(uuid())
+  userId      String
+  status      String    @default("pending")
+  executeAt   DateTime
+  cancelledAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, executeAt])
+  @@index([userId, createdAt])
+}
+
+model InboxItem {
+  id           String      @id @default(uuid())
+  userId       String
+  source       String
+  sourceRef    String?
+  kind         String
+  title        String
+  summary      String?     @db.Text
+  payload      Json
+  status       InboxStatus @default(PENDING)
+  snoozedUntil DateTime?
+  projectId    String?
+  priority     Int         @default(0)
+  triagedAt    DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, source, sourceRef])
+  @@index([userId, status, createdAt])
+  @@index([projectId, status])
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  userId      String
+  name        String
+  description String?       @db.Text
+  color       String        @default("#6366f1")
+  status      String        @default("active")
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  links       ProjectLink[]
+  inboxItems  InboxItem[]
+
+  @@unique([userId, name])
+  @@index([userId, status, updatedAt])
+}
+
+model ProjectLink {
+  id         String   @id @default(uuid())
+  userId     String
+  projectId  String
+  targetType String
+  targetId   String
+  relation   String   @default("belongs_to")
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, targetType, targetId])
+  @@index([userId, targetType, targetId])
+}
+
+model AutomationRule {
+  id          String          @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  enabled     Boolean         @default(true)
+  trigger     Json
+  conditions  Json            @default("[]")
+  actions     Json
+  lastRunAt   DateTime?
+  runCount    Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs        AutomationRun[]
+
+  @@index([userId, enabled, updatedAt])
+}
+
+model AutomationRun {
+  id             String              @id @default(uuid())
+  userId         String
+  ruleId         String
+  triggerEventId String?
+  status         AutomationRunStatus @default(RUNNING)
+  depth          Int                 @default(0)
+  input          Json?
+  output         Json?
+  error          String?             @db.Text
+  startedAt      DateTime            @default(now())
+  completedAt    DateTime?
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rule           AutomationRule      @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, triggerEventId])
+  @@index([userId, startedAt])
+}
+
+model RateLimitBucket {
+  key       String   @id
+  count     Int      @default(0)
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
 }

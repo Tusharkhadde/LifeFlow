@@ -1,8 +1,24 @@
 {
   "crons": [
     {
+      "path": "/api/jobs/dispatch",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/telegram/notify",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/weekly-review",
+      "schedule": "0 9 * * 0"
+    },
+    {
+      "path": "/api/automation/run",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/maintenance",
+      "schedule": "30 2 * * *"
     }
   ]
 }
